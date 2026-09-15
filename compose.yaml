@@ -1,0 +1,18 @@
+# Local test target: an SSH server plus a logged-in XFCE desktop.
+#   pnpm dev:target   builds and starts it
+#   pnpm dev          runs the server on http://localhost:8080
+# Then connect to host 127.0.0.1, port 2222, user desk, password desk.
+services:
+  target:
+    build:
+      context: .
+      dockerfile: dev/target.Dockerfile
+    init: true # reap processes orphaned by ended SSH sessions
+    ports:
+      - "2222:22"
+      # WebRTC traffic; the agent pins ICE to this port (see the Dockerfile).
+      - "50000:50000/udp"
+      - "50000:50000/tcp"
+    volumes:
+      - ./dev/ssh:/etc/webdesk/ssh:ro
+    shm_size: 512m

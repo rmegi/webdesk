@@ -1,0 +1,28 @@
+{
+  "name": "webdesk",
+  "description": "Web-based remote desktop for Linux: SSH login, WebRTC screen, mouse and keyboard",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p web && node --run build:agent",
+    "build:agent": "cd agent && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-agent-linux-amd64 . && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-agent-linux-arm64 .",
+    "dev": "node --run build && (tsc -p web --watch --preserveWatchOutput & WEBDESK_SSH_KEY=dev/ssh/id_ed25519 node --watch server/server.ts)",
+    "dev:target": "(test -f dev/ssh/id_ed25519 || (mkdir -p dev/ssh && ssh-keygen -q -t ed25519 -N '' -C webdesk-dev -f dev/ssh/id_ed25519)) && docker compose up -d --build",
+    "start": "node --run build && node server/server.ts",
+    "typecheck": "tsc -p server && tsc -p web --noEmit"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "@types/ssh2": "^1.15.6",
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2"
+  }
+}

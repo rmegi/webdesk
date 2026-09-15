@@ -1,0 +1,5 @@
+# ssh2's native add-ons are optional speedups; it falls back to pure JS.
+# Marking them reviewed keeps pnpm 11 from failing installs over skipped builds.
+allowBuilds:
+  cpu-features: false
+  ssh2: false

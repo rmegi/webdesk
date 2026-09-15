@@ -1,0 +1,176 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #181b22;
+  --line: #2a2f3a;
+  --text: #e6e8ee;
+  --muted: #8b93a5;
+  --accent: #5b9dff;
+  --danger: #ff7b72;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button,
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+button {
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+/* Login */
+#login {
+  max-width: 380px;
+  margin: 12vh auto;
+  padding-inline: 16px;
+}
+
+#login h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.hint {
+  color: var(--muted);
+  margin: 0;
+}
+
+#login-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+#login-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#login-form input {
+  padding: 8px 10px;
+}
+
+#login-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+.row .grow {
+  flex: 1;
+}
+
+.row .port {
+  width: 88px;
+}
+
+#connect {
+  padding: 9px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#connect:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+/* Session */
+#session {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+#status,
+#hud {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer {
+  flex: 1;
+}
+
+#screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  outline: none;
+  touch-action: none;
+}
+
+#screen:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+#video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-inline: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+  pointer-events: none;
+}

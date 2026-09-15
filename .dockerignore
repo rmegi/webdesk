@@ -1,0 +1,4 @@
+# The test target image only needs its start scripts.
+*
+!dev/start-target.sh
+!dev/start-desktop.sh

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>webdesk</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main id="login">
+      <h1>webdesk</h1>
+      <p class="hint">Connect to a Linux desktop over SSH.</p>
+      <form id="login-form">
+        <div class="row">
+          <label class="grow">
+            Host
+            <input name="host" required placeholder="192.168.1.20" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          </label>
+          <label class="port">
+            Port
+            <input name="port" type="number" min="1" max="65535" value="22" />
+          </label>
+        </div>
+        <label>
+          Username
+          <input name="username" required autocomplete="username" autocapitalize="off" spellcheck="false" />
+        </label>
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="current-password" />
+        </label>
+        <button id="connect" type="submit">Connect</button>
+        <p id="login-error" class="error" role="alert" hidden></p>
+      </form>
+    </main>
+
+    <section id="session" hidden>
+      <header id="bar">
+        <button id="disconnect" type="button">Disconnect</button>
+        <strong id="title"></strong>
+        <span id="status"></span>
+        <span id="hud"></span>
+        <span class="spacer"></span>
+        <button id="reconnect" type="button">Reconnect</button>
+        <button id="fullscreen" type="button">Fullscreen</button>
+      </header>
+      <div id="screen" tabindex="0">
+        <video id="video" autoplay muted playsinline disablepictureinpicture></video>
+        <div id="overlay"></div>
+      </div>
+    </section>
+
+    <script type="module" src="/dist/main.js"></script>
+  </body>
+</html>

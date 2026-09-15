@@ -1,0 +1,5 @@
+node_modules/
+web/dist/
+agent/dist/
+server/data/
+dev/ssh/
