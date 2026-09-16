@@ -15,19 +15,31 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
 1. The browser sends the login to the **webdesk server** (`server/`).
 2. The server logs in over SSH, uploads the **agent** (`agent/`) to
    `~/.cache/webdesk/` if this build isn't there yet, and starts it as that user.
-3. The agent finds the user's desktop session on the machine's monitor, captures
-   it with ffmpeg (H.264) and streams it to the browser over WebRTC. Mouse and
-   keyboard come back over a WebRTC data channel and are replayed with XTEST.
-4. The server only relays connection setup (offer, answer, ICE candidates)
+3. The agent checks what the machine is missing (ffmpeg, or what a virtual
+   desktop needs). The page lists it and installs it with `sudo apt-get` only
+   after you confirm.
+4. The agent shows the user's X11 desktop on the machine's monitor. If there
+   isn't one (no monitor, or a Wayland desktop), it starts a **virtual X11
+   desktop** on Xvfb with the machine's own desktop environment. The virtual
+   desktop keeps running when you disconnect; **Log out** ends it.
+5. The screen is captured with ffmpeg (H.264) and streamed to the browser over
+   WebRTC. Mouse and keyboard come back over a WebRTC data channel and are
+   replayed with XTEST.
+6. The server only relays connection setup (offer, answer, ICE candidates)
    between browser and agent, through the SSH session. Video and input go
    peer-to-peer.
 
 ## Target machine requirements
 
 - Linux on x86_64 or arm64, reachable over SSH from the webdesk server
-- `ffmpeg` installed
-- The user logged in at the machine in an **X11 (Xorg) session**. Wayland isn't
-  supported yet; most login screens let you pick "Xorg" or "on Xorg".
+- `ffmpeg`. A virtual desktop also needs `Xvfb`, `dbus-launch` and a desktop
+  environment (LXDE on Raspberry Pi OS, XFCE, MATE, LXQt or Openbox)
+- On Debian, Ubuntu and Raspberry Pi OS, webdesk installs missing packages from
+  the page after you confirm. That needs `sudo`: passwordless, or the same
+  password you logged in with.
+
+A Wayland desktop on the monitor isn't shown directly yet; you get a virtual
+X11 desktop instead.
 
 ## Project layout
 
@@ -78,13 +90,14 @@ Server environment variables:
 | `PORT`                | `8080`                         | HTTP port                                                     |
 | `HOST`                | `127.0.0.1`                    | Listen address                                                |
 | `WEBDESK_ICE_SERVERS` | Google STUN                    | JSON array of `RTCIceServer`, e.g. to add a TURN relay        |
-| `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in `pnpm dev`) | Private key used when the password is left empty            |
+| `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in `pnpm dev`) | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
 
 Agent environment variables, read from the SSH session's environment:
 
 | Variable              | Default | Purpose                                                           |
 | --------------------- | ------- | ----------------------------------------------------------------- |
 | `WEBDESK_FPS`         | `30`    | Capture frame rate                                                |
+| `WEBDESK_VIRTUAL_SIZE` | `1920x1080` | Screen size of a virtual desktop                              |
 | `WEBDESK_ICE_PORT`    | random  | Pin WebRTC to one UDP+TCP port                                    |
 | `WEBDESK_ICE_HOST_IP` | none    | Advertise this IP instead of local ones (e.g. behind port mapping) |
 
@@ -97,9 +110,20 @@ Agent environment variables, read from the SSH session's environment:
 - Passwords are used only for the SSH login. They aren't logged or stored, and
   the browser remembers only host, port and username.
 
+## Troubleshooting
+
+- **"Couldn't reach" a machine on your local network, with the server running
+  on a Mac.** macOS blocks apps that don't have Local Network permission, and
+  `ssh` or `ping` still working doesn't rule it out because built-in tools are
+  exempt. Allow the app that runs the server (your terminal, or Claude) in
+  System Settings → Privacy & Security → Local Network, then restart the server.
+  To check, `node -e "require('net').connect(22, '<ip>').on('error', e => console.log(e.code))"`
+  prints `EHOSTUNREACH` straight away while it's blocked.
+
 ## Known limitations
 
-- X11 only; the whole X screen is captured, so multiple monitors show as one image.
+- A Wayland screen is replaced by a virtual X11 desktop rather than shown. The
+  whole X screen is captured, so multiple monitors show as one image.
 - Keyframes come every 2 seconds, so packet loss can freeze the picture briefly.
 - The remote cursor is drawn into the video, so it lags slightly behind your pointer.
 - On a Mac, Cmd is sent as the Super key. There's no clipboard or audio yet.

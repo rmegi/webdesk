@@ -4,9 +4,16 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import type { Readable } from "node:stream";
-import ssh2, { type Client, type ClientChannel } from "ssh2";
+import ssh2, {
+  type Client,
+  type ClientChannel,
+  type KeyboardInteractiveAuthMethod,
+  type PasswordAuthMethod,
+  type PublicKeyAuthMethod,
+} from "ssh2";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -17,12 +24,16 @@ const ROOT = join(import.meta.dirname, "..");
 const WEB_ROOT = join(ROOT, "web");
 const AGENT_DIR = join(ROOT, "agent", "dist");
 const KNOWN_HOSTS_FILE = join(ROOT, "server", "data", "known_hosts.json");
-// Optional private key, used when the viewer leaves the password empty.
-const SSH_KEY_FILE = process.env.WEBDESK_SSH_KEY;
+// Optional private keys (comma-separated paths), tried when the viewer leaves the password empty.
+const SSH_KEY_FILES = (process.env.WEBDESK_SSH_KEY ?? "")
+  .split(",")
+  .map((path) => path.trim())
+  .filter(Boolean);
 const ICE_SERVERS: unknown[] = process.env.WEBDESK_ICE_SERVERS
   ? JSON.parse(process.env.WEBDESK_ICE_SERVERS)
   : [{ urls: ["stun:stun.l.google.com:19302"] }]; // pion requires urls to be an array
-const RELAYED = new Set(["offer", "candidate"]);
+const RELAYED = new Set(["offer", "candidate", "logout"]);
+const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*$/;
 const ARCHES: Record<string, string> = { x86_64: "amd64", aarch64: "arm64", arm64: "arm64" };
 const REMOTE_DIR = `"$HOME"/.cache/webdesk`;
 const MIME: Record<string, string> = {
@@ -37,6 +48,14 @@ interface Target {
   port: number;
   username: string;
   password: string;
+}
+
+/** What `webdesk-agent check` reports about a machine. */
+interface MachineCheck {
+  virtual: boolean; // no X11 desktop on the monitor, so a virtual one will be used
+  missing: string[] | null; // commands that aren't installed ("desktop" = no desktop environment)
+  packages: string[] | null; // apt packages providing them
+  sudo?: "nopasswd" | "password" | "none";
 }
 
 /** An error whose message is written for the person at the browser. */
@@ -98,29 +117,47 @@ async function rememberHost(hostId: string, fingerprint: string) {
   await writeFile(KNOWN_HOSTS_FILE, `${JSON.stringify(hosts, null, 2)}\n`);
 }
 
+type SshAuth = PasswordAuthMethod | KeyboardInteractiveAuthMethod | PublicKeyAuthMethod;
+
+function passwordAuth({ username, password }: Target): SshAuth[] {
+  return [
+    { type: "password", username, password },
+    // Some servers only accept passwords through keyboard-interactive auth.
+    {
+      type: "keyboard-interactive",
+      username,
+      prompt: (_name, _instructions, _lang, prompts, finish) => finish(prompts.map(() => password)),
+    },
+  ];
+}
+
+// The server's configured keys, skipping missing files and passphrase-protected keys.
+async function keyAuth(username: string): Promise<SshAuth[]> {
+  const methods: SshAuth[] = [];
+  for (const path of SSH_KEY_FILES) {
+    const key = await readFile(path.startsWith("~/") ? join(homedir(), path.slice(2)) : path).catch(() => undefined);
+    if (key && !(ssh2.utils.parseKey(key) instanceof Error)) methods.push({ type: "publickey", username, key });
+  }
+  return methods;
+}
+
 // Logs in, pinning each machine's host key on first use like ssh's known_hosts.
 async function sshLogin(target: Target): Promise<Client> {
   const hostId = `${target.host}:${target.port}`;
   const known = (await readKnownHosts())[hostId];
-  const privateKey = !target.password && SSH_KEY_FILE ? await readFile(SSH_KEY_FILE) : undefined;
-  if (!target.password && !privateKey) throw new UserError("Enter a password.");
+  const auth = target.password ? passwordAuth(target) : await keyAuth(target.username);
+  if (auth.length === 0) throw new UserError("Enter a password.");
 
   let fingerprint = "";
   const ssh = await new Promise<Client>((resolve, reject) => {
     const client = new ssh2.Client();
     client.on("ready", () => resolve(client));
     client.on("error", reject);
-    // Some servers only accept passwords through keyboard-interactive auth.
-    client.on("keyboard-interactive", (_name, _instructions, _lang, prompts, finish) =>
-      finish(prompts.map(() => target.password)),
-    );
     client.connect({
       host: target.host,
       port: target.port,
       username: target.username,
-      password: target.password || undefined,
-      privateKey,
-      tryKeyboard: target.password !== "",
+      authHandler: auth,
       readyTimeout: 20_000,
       keepaliveInterval: 15_000,
       hostVerifier: (key: Buffer) => {
@@ -178,13 +215,9 @@ function onLines(stream: Readable, handler: (line: string) => void) {
 
 // Makes sure this build of the agent is on the machine; returns its remote path.
 async function installAgent(ssh: Client, status: (message: string) => void): Promise<string> {
-  const probe = await run(ssh, `sh -c 'uname -m; command -v ffmpeg >/dev/null && echo has-ffmpeg'`);
-  const [machine = "", ffmpeg] = probe.stdout.split("\n").map((line) => line.trim());
+  const machine = (await run(ssh, "uname -m")).stdout.trim();
   const arch = ARCHES[machine];
   if (!arch) throw new UserError(`webdesk doesn't support this machine's CPU (${machine || "unknown"}) yet.`);
-  if (ffmpeg !== "has-ffmpeg") {
-    throw new UserError("ffmpeg isn't installed on the machine. Install it there (for example: sudo apt install ffmpeg) and connect again.");
-  }
 
   const binary = await readFile(join(AGENT_DIR, `webdesk-agent-linux-${arch}`)).catch(() => {
     throw new UserError(`The linux/${arch} agent isn't built. Run "pnpm build:agent" on the server.`);
@@ -205,16 +238,41 @@ async function installAgent(ssh: Client, status: (message: string) => void): Pro
   return path;
 }
 
+async function checkMachine(ssh: Client, agentPath: string): Promise<MachineCheck> {
+  const result = await run(ssh, `sh -c '${agentPath} check'`);
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new UserError(`Couldn't check the machine: ${lastLines(result.stderr) || "the agent gave no answer"}`);
+  }
+}
+
+function lastLines(text: string, count = 3): string {
+  return text.trim().split("\n").slice(-count).join(" ");
+}
+
+// RFC 1918 and link-local IPv4 addresses, and mDNS .local names.
+function isLocalNetworkHost(host: string): boolean {
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(host) || host.endsWith(".local");
+}
+
 function describeError(err: unknown, target: Target): string {
   if (err instanceof UserError) return err.message;
   const e = err as { level?: string; code?: string; message?: string };
+  console.error(`session failed for ${target.username}@${target.host}:${target.port}: ${e.code ?? e.level ?? ""} ${e.message ?? err}`);
   if (e.level === "client-authentication") return "Wrong username or password.";
   if (e.code === "ECONNREFUSED") return `Nothing is accepting SSH connections on ${target.host}:${target.port}.`;
   if (e.code === "ENOTFOUND" || e.code === "EAI_AGAIN") return `Can't find a machine called ${target.host}.`;
+  if (e.code === "EHOSTUNREACH" && process.platform === "darwin" && isLocalNetworkHost(target.host)) {
+    // macOS answers this instantly when the app running the server lacks Local Network permission.
+    return (
+      `Couldn't reach ${target.host}:${target.port}. If it's on your local network, macOS may be blocking this server: ` +
+      "allow the app that runs it in System Settings → Privacy & Security → Local Network, then restart the server."
+    );
+  }
   if (e.code === "ETIMEDOUT" || e.code === "EHOSTUNREACH" || /timed out/i.test(e.message ?? "")) {
     return `Couldn't reach ${target.host}:${target.port}.`;
   }
-  console.error(err);
   return e.message ?? String(err);
 }
 
@@ -231,6 +289,7 @@ wss.on("connection", (ws) => {
   let ended = false;
   let ssh: Client | undefined;
   let agent: ClientChannel | undefined;
+  let approveInstall: (() => void) | undefined;
 
   const status = (message: string) => send(ws, { type: "status", message });
   const end = (error?: string) => {
@@ -267,9 +326,16 @@ wss.on("connection", (ws) => {
       startSession(target).catch((err) => end(describeError(err, target)));
       return;
     }
+    if (msg.type === "install") {
+      approveInstall?.();
+      return;
+    }
     if (agent && typeof msg.type === "string" && RELAYED.has(msg.type)) agent.write(`${JSON.stringify(msg)}\n`);
   });
-  ws.on("close", () => end());
+  ws.on("close", () => {
+    end();
+    approveInstall?.(); // a session waiting on setup notices it ended and stops
+  });
 
   async function startSession(target: Target) {
     const label = `${target.username}@${target.host}:${target.port}`;
@@ -286,6 +352,13 @@ wss.on("connection", (ws) => {
 
     status("Checking the machine…");
     const agentPath = await installAgent(client, status);
+    let check = await checkMachine(client, agentPath);
+    if (check.missing?.length) {
+      await setUpMachine(client, target, check);
+      if (ended) return;
+      check = await checkMachine(client, agentPath);
+      if (check.missing?.length) throw new UserError(`Still missing after installing: ${check.missing.join(", ")}.`);
+    }
     if (ended) return;
 
     status("Starting the agent…");
@@ -299,7 +372,7 @@ wss.on("connection", (ws) => {
     channel.stderr.setEncoding("utf8");
     onLines(channel.stderr, (line) => console.log(`[${label}] ${line}`));
     onLines(channel, (line) => {
-      let msg: { type?: string; message?: string };
+      let msg: { type?: string; message?: string; virtual?: boolean };
       try {
         msg = JSON.parse(line);
       } catch {
@@ -308,15 +381,47 @@ wss.on("connection", (ws) => {
       }
       if (msg.type === "ready") {
         status("Opening the screen…");
-        send(ws, { type: "joined", iceServers: ICE_SERVERS });
+        send(ws, { type: "joined", iceServers: ICE_SERVERS, virtual: msg.virtual === true });
       } else if (msg.type === "error") {
         end(msg.message);
-      } else {
+      } else if (msg.type === "bye") {
         send(ws, msg);
+        end();
+      } else {
+        send(ws, msg); // status, answer, candidate
       }
     });
     channel.on("close", () => end("The agent on the machine stopped."));
     channel.write(`${JSON.stringify({ type: "config", iceServers: ICE_SERVERS })}\n`);
+  }
+
+  // Installs what the machine is missing, once the viewer approves in the page.
+  async function setUpMachine(client: Client, target: Target, check: MachineCheck) {
+    const tools = (check.missing ?? []).map((name) => (name === "desktop" ? "a desktop environment" : name)).join(", ");
+    const packages = check.packages ?? [];
+    if (packages.length === 0) throw new UserError(`This machine needs ${tools}. Install them there and connect again.`);
+    if (!packages.every((name) => PACKAGE_NAME.test(name))) throw new UserError("The machine reported unexpected package names.");
+    const canSudo = check.sudo === "nopasswd" || (check.sudo === "password" && target.password !== "");
+    if (!canSudo) {
+      throw new UserError(
+        `This machine needs ${tools}. Run this there, then connect again: sudo apt-get install --no-install-recommends ${packages.join(" ")}`,
+      );
+    }
+
+    send(ws, { type: "setup", tools, packages, virtual: check.virtual });
+    await new Promise<void>((resolve) => (approveInstall = resolve));
+    approveInstall = undefined;
+    if (ended) return;
+
+    status(`Installing ${packages.join(", ")}… This can take a few minutes.`);
+    const apt = "DEBIAN_FRONTEND=noninteractive apt-get";
+    const script = `${apt} update -qq && ${apt} install -y -qq --no-install-recommends ${packages.join(" ")}`;
+    const result =
+      check.sudo === "nopasswd"
+        ? await run(client, `sudo -n sh -c '${script}'`)
+        : await run(client, `sudo -S -p "" sh -c '${script}'`, Buffer.from(`${target.password}\n`));
+    if (result.code !== 0) throw new UserError(`Installing failed: ${lastLines(result.stderr || result.stdout)}`);
+    console.log(`installed on ${target.host}: ${packages.join(" ")}`);
   }
 });
 

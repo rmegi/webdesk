@@ -23,10 +23,11 @@ import (
 )
 
 type config struct {
-	display   string
-	fps       int
-	icePort   int
-	iceHostIP string
+	display     string
+	virtualSize string
+	fps         int
+	icePort     int
+	iceHostIP   string
 }
 
 // message is the signaling envelope exchanged with the server and the viewer.
@@ -36,7 +37,15 @@ type message struct {
 	Candidate  *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
 	ICEServers []webrtc.ICEServer         `json:"iceServers,omitempty"`
 	Display    string                     `json:"display,omitempty"`
+	Virtual    bool                       `json:"virtual,omitempty"`
 	Message    string                     `json:"message,omitempty"`
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func envInt(key string, fallback int) int {
@@ -48,20 +57,29 @@ func envInt(key string, fallback int) int {
 
 func main() {
 	var cfg config
-	flag.StringVar(&cfg.display, "display", "auto", `X11 display to share, or "auto" to find this user's desktop session`)
+	flag.StringVar(&cfg.display, "display", "auto", `X11 display to share, or "auto" for the user's desktop on the monitor, else a virtual desktop`)
+	flag.StringVar(&cfg.virtualSize, "virtual-size", envOr("WEBDESK_VIRTUAL_SIZE", "1920x1080"), "screen size of a virtual desktop")
 	flag.IntVar(&cfg.fps, "fps", envInt("WEBDESK_FPS", 30), "capture frame rate")
 	flag.IntVar(&cfg.icePort, "ice-port", envInt("WEBDESK_ICE_PORT", 0), "fixed UDP+TCP port for WebRTC traffic (0 = random ports)")
 	flag.StringVar(&cfg.iceHostIP, "ice-host-ip", os.Getenv("WEBDESK_ICE_HOST_IP"), "advertise this IP instead of local ones (e.g. behind Docker port mapping)")
 	flag.Parse()
 
+	if flag.Arg(0) == "check" {
+		runCheck()
+		return
+	}
+
 	out := &output{enc: json.NewEncoder(os.Stdout)}
 
+	virtual := false
 	if cfg.display == "auto" {
-		display, err := findDisplay()
+		display, isVirtual, err := chooseDisplay(cfg.virtualSize, func(status string) {
+			out.send(message{Type: "status", Message: status})
+		})
 		if err != nil {
 			out.fail(err)
 		}
-		cfg.display = display
+		cfg.display, virtual = display, isVirtual
 	}
 	input, err := NewInput(cfg.display)
 	if err != nil {
@@ -73,8 +91,8 @@ func main() {
 		out.fail(fmt.Errorf("webrtc setup: %w", err))
 	}
 
-	slog.Info("ready", "display", cfg.display)
-	out.send(message{Type: "ready", Display: cfg.display})
+	slog.Info("ready", "display", cfg.display, "virtual", virtual)
+	out.send(message{Type: "ready", Display: cfg.display, Virtual: virtual})
 
 	var iceServers []webrtc.ICEServer
 	var session *Session
@@ -104,6 +122,15 @@ func main() {
 			if session != nil && msg.Candidate != nil {
 				session.AddCandidate(*msg.Candidate)
 			}
+		case "logout":
+			if session != nil {
+				session.Close()
+			}
+			if desktop, ok := runningVirtualDesktop(); ok && virtual {
+				stopVirtualDesktop(desktop)
+			}
+			out.send(message{Type: "bye", Message: "Logged out of the virtual desktop."})
+			return
 		}
 	}
 

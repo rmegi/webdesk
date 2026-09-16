@@ -1,10 +1,7 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -12,16 +9,23 @@ import (
 	"syscall"
 )
 
-// findDisplay locates the desktop session the current user is logged into on
-// the machine's own screen by reading the environment of that user's processes.
-// It exports XAUTHORITY so both our X connection and ffmpeg can authenticate.
-func findDisplay() (string, error) {
+// liveDisplay is an X11 desktop the user is running on the machine's monitor.
+type liveDisplay struct {
+	display    string
+	xauthority string
+}
+
+// findLiveDisplay looks for an X11 desktop the current user is logged into on
+// the machine's monitor by reading the environment of that user's processes.
+// Wayland sessions don't count (their Xwayland display only shows X11 apps),
+// and skip excludes webdesk's own virtual desktop.
+func findLiveDisplay(skip string) (liveDisplay, bool) {
 	uid := uint32(os.Getuid())
 	dirs, _ := filepath.Glob("/proc/[0-9]*")
 	sort.Slice(dirs, func(i, j int) bool { return pidOf(dirs[i]) < pidOf(dirs[j]) })
 
-	var fallback map[string]string
-	sawWayland := false
+	var typed, untyped []map[string]string
+	waylandDisplays := map[string]bool{}
 	for _, dir := range dirs {
 		info, err := os.Stat(dir)
 		if err != nil {
@@ -35,37 +39,49 @@ func findDisplay() (string, error) {
 			continue
 		}
 		env := parseEnviron(raw)
-		switch {
-		case env["XDG_SESSION_TYPE"] == "wayland":
-			sawWayland = true
-		case !strings.HasPrefix(env["DISPLAY"], ":"):
-			// No display, or an SSH-forwarded one like localhost:10.
-		case env["XDG_SESSION_TYPE"] == "x11":
-			return useDisplay(env), nil
-		case fallback == nil:
-			// startx or Xvfb sessions often don't set XDG_SESSION_TYPE.
-			fallback = env
+		display := env["DISPLAY"]
+		// No display, an SSH-forwarded one like localhost:10, or our own.
+		if !strings.HasPrefix(display, ":") || display == skip {
+			continue
+		}
+		switch env["XDG_SESSION_TYPE"] {
+		case "wayland":
+			waylandDisplays[display] = true
+		case "x11":
+			typed = append(typed, env)
+		default:
+			// startx and Xvfb sessions often don't set XDG_SESSION_TYPE.
+			untyped = append(untyped, env)
 		}
 	}
 
-	if sawWayland {
-		return "", errors.New("this desktop session is Wayland, and webdesk supports X11 for now. Log out and pick an Xorg session at the login screen")
+	for _, env := range append(typed, untyped...) {
+		if !waylandDisplays[env["DISPLAY"]] {
+			return liveDisplay{display: env["DISPLAY"], xauthority: env["XAUTHORITY"]}, true
+		}
 	}
-	if fallback != nil {
-		return useDisplay(fallback), nil
-	}
-	name := strconv.Itoa(int(uid))
-	if u, err := user.Current(); err == nil {
-		name = u.Username
-	}
-	return "", fmt.Errorf("no desktop session found for %s. Log in on the machine's screen first", name)
+	return liveDisplay{}, false
 }
 
-func useDisplay(env map[string]string) string {
-	if xauth := env["XAUTHORITY"]; xauth != "" {
-		os.Setenv("XAUTHORITY", xauth)
+// chooseDisplay picks what the viewer sees: the user's X11 desktop on the
+// monitor if there is one, otherwise webdesk's virtual desktop, starting it if
+// needed. It exports XAUTHORITY so our X connection and ffmpeg can connect.
+func chooseDisplay(size string, status func(string)) (display string, virtual bool, err error) {
+	running, haveVirtual := runningVirtualDesktop()
+	if live, ok := findLiveDisplay(running.Display); ok {
+		if live.xauthority != "" {
+			os.Setenv("XAUTHORITY", live.xauthority)
+		}
+		return live.display, false, nil
 	}
-	return env["DISPLAY"]
+
+	os.Setenv("XAUTHORITY", virtualAuthPath())
+	if haveVirtual {
+		return running.Display, true, nil
+	}
+	status("Starting a virtual desktop…")
+	started, err := startVirtualDesktop(size)
+	return started.Display, true, err
 }
 
 func parseEnviron(raw []byte) map[string]string {
