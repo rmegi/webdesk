@@ -25,7 +25,9 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
 5. The screen is captured with ffmpeg (H.264) and streamed to the browser over
    WebRTC. Mouse and keyboard come back over a WebRTC data channel and are
    replayed with XTEST. The cursor is kept out of the video and sent as a
-   picture, so the browser draws it at your pointer with no network wait.
+   picture, so the browser draws it at your pointer with no network wait. The
+   clipboard travels the same channel both ways: the agent holds the machine's
+   X selection on your behalf and hands the text over when something pastes.
 6. The server only relays connection setup (offer, answer, ICE candidates)
    between browser and agent, through the SSH session. Video and input go
    peer-to-peer.
@@ -128,7 +130,9 @@ Agent environment variables, read from the SSH session's environment:
 - A keyframe is sent every second, and the encoder restarts when the viewer asks
   for one, so packet loss clears quickly at the cost of a brief hiccup.
 - On a Mac, Cmd is sent as Ctrl so the usual shortcuts work on the machine.
-  There's no clipboard or audio yet.
+  There's no audio or file transfer yet.
+- The clipboard carries plain text only, up to 1 MiB. Images and files aren't
+  shared, and copying in the browser needs the page to have focus.
 
 ## Roadmap
 

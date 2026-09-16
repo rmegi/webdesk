@@ -12,6 +12,10 @@ RUN apt-get update \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-server \
  && rm -rf /var/lib/apt/lists/*
+# xclip lets tests put text on the X clipboard and read it back.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xclip \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash desk
 RUN echo 'desk:desk' | chpasswd && mkdir -p /run/sshd
