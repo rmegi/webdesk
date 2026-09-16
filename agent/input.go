@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/jezek/xgb"
@@ -33,8 +34,9 @@ type inputEvent struct {
 
 // Input replays viewer events into the X server through the XTEST extension.
 type Input struct {
-	conn *xgb.Conn
-	root xproto.Window
+	conn    *xgb.Conn
+	root    xproto.Window
+	injects bool // the X server really acts on injected input
 
 	mu      sync.Mutex
 	width   int
@@ -74,10 +76,45 @@ func NewInput(display string) (*Input, error) {
 		conn.Close()
 		return nil, err
 	}
+	in.injects = in.probeInjection()
 	return in, nil
 }
 
 func (in *Input) Close() { in.conn.Close() }
+
+// CanInject reports whether this display acts on the input we send it.
+func (in *Input) CanInject() bool { return in.injects }
+
+// probeInjection nudges the pointer by a pixel and asks the X server where the
+// pointer ended up. Xwayland and servers with XTEST switched off accept the
+// requests and quietly ignore them, which would leave the viewer with a screen
+// they can look at but not touch.
+func (in *Input) probeInjection() bool {
+	if extensions, err := xproto.ListExtensions(in.conn).Reply(); err == nil {
+		names := make([]string, 0, len(extensions.Names))
+		for _, name := range extensions.Names {
+			names = append(names, name.Name)
+		}
+		slog.Info("x server", "xwayland", slices.Contains(names, "XWAYLAND"), "xtest", slices.Contains(names, "XTEST"))
+	}
+
+	before, err := xproto.QueryPointer(in.conn, in.root).Reply()
+	if err != nil {
+		return false
+	}
+	target := before.RootX + 1
+	if int(target) >= in.width {
+		target = before.RootX - 1
+	}
+	xtest.FakeInput(in.conn, xproto.MotionNotify, 0, 0, in.root, target, before.RootY, 0)
+	// QueryPointer is a round trip, so the move has been handled by now.
+	after, err := xproto.QueryPointer(in.conn, in.root).Reply()
+	if err != nil {
+		return false
+	}
+	xtest.FakeInput(in.conn, xproto.MotionNotify, 0, 0, in.root, before.RootX, before.RootY, 0)
+	return after.RootX == target
+}
 
 // ScreenSize reads the current root window size, so resolution changes are picked up.
 func (in *Input) ScreenSize() (int, int, error) {

@@ -24,7 +24,8 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
    desktop keeps running when you disconnect; **Log out** ends it.
 5. The screen is captured with ffmpeg (H.264) and streamed to the browser over
    WebRTC. Mouse and keyboard come back over a WebRTC data channel and are
-   replayed with XTEST.
+   replayed with XTEST. The cursor is kept out of the video and sent as a
+   picture, so the browser draws it at your pointer with no network wait.
 6. The server only relays connection setup (offer, answer, ICE candidates)
    between browser and agent, through the SSH session. Video and input go
    peer-to-peer.
@@ -124,9 +125,10 @@ Agent environment variables, read from the SSH session's environment:
 
 - A Wayland screen is replaced by a virtual X11 desktop rather than shown. The
   whole X screen is captured, so multiple monitors show as one image.
-- Keyframes come every 2 seconds, so packet loss can freeze the picture briefly.
-- The remote cursor is drawn into the video, so it lags slightly behind your pointer.
-- On a Mac, Cmd is sent as the Super key. There's no clipboard or audio yet.
+- A keyframe is sent every second, and the encoder restarts when the viewer asks
+  for one, so packet loss clears quickly at the cost of a brief hiccup.
+- On a Mac, Cmd is sent as Ctrl so the usual shortcuts work on the machine.
+  There's no clipboard or audio yet.
 
 ## Roadmap
 

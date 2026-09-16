@@ -32,13 +32,15 @@ type config struct {
 
 // message is the signaling envelope exchanged with the server and the viewer.
 type message struct {
-	Type       string                     `json:"type"`
-	SDP        *webrtc.SessionDescription `json:"sdp,omitempty"`
-	Candidate  *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
-	ICEServers []webrtc.ICEServer         `json:"iceServers,omitempty"`
-	Display    string                     `json:"display,omitempty"`
-	Virtual    bool                       `json:"virtual,omitempty"`
-	Message    string                     `json:"message,omitempty"`
+	Type        string                     `json:"type"`
+	SDP         *webrtc.SessionDescription `json:"sdp,omitempty"`
+	Candidate   *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
+	ICEServers  []webrtc.ICEServer         `json:"iceServers,omitempty"`
+	Display     string                     `json:"display,omitempty"`
+	Virtual     bool                       `json:"virtual,omitempty"`
+	VirtualSize string                     `json:"virtualSize,omitempty"`
+	Warning     string                     `json:"warning,omitempty"`
+	Message     string                     `json:"message,omitempty"`
 }
 
 func envOr(key, fallback string) string {
@@ -71,31 +73,19 @@ func main() {
 
 	out := &output{enc: json.NewEncoder(os.Stdout)}
 
-	virtual := false
-	if cfg.display == "auto" {
-		display, isVirtual, err := chooseDisplay(cfg.virtualSize, func(status string) {
-			out.send(message{Type: "status", Message: status})
-		})
-		if err != nil {
-			out.fail(err)
+	var (
+		input      *Input
+		api        *webrtc.API
+		iceServers []webrtc.ICEServer
+		session    *Session
+		virtual    bool
+	)
+	defer func() {
+		if input != nil {
+			input.Close()
 		}
-		cfg.display, virtual = display, isVirtual
-	}
-	input, err := NewInput(cfg.display)
-	if err != nil {
-		out.fail(fmt.Errorf("can't open display %s: %w", cfg.display, err))
-	}
-	defer input.Close()
-	api, err := newWebRTCAPI(cfg)
-	if err != nil {
-		out.fail(fmt.Errorf("webrtc setup: %w", err))
-	}
+	}()
 
-	slog.Info("ready", "display", cfg.display, "virtual", virtual)
-	out.send(message{Type: "ready", Display: cfg.display, Virtual: virtual})
-
-	var iceServers []webrtc.ICEServer
-	var session *Session
 	lines := bufio.NewScanner(os.Stdin)
 	lines.Buffer(make([]byte, 64<<10), 1<<20)
 	for lines.Scan() {
@@ -106,18 +96,28 @@ func main() {
 		}
 		switch msg.Type {
 		case "config":
+			// The server sends this first. It carries the viewer's window size,
+			// which decides how big a new virtual desktop is.
 			iceServers = msg.ICEServers
+			if msg.VirtualSize != "" {
+				cfg.virtualSize = msg.VirtualSize
+			}
+			if input == nil {
+				input, api, virtual = startAgent(&cfg, out)
+			}
 		case "offer":
-			if msg.SDP == nil {
+			if msg.SDP == nil || input == nil {
 				continue
 			}
 			if session != nil {
 				session.Close()
 			}
-			session, err = newSession(api, iceServers, input, cfg, out.send, *msg.SDP)
+			started, err := newSession(api, iceServers, input, cfg, out.send, *msg.SDP)
 			if err != nil {
 				slog.Error("session setup failed", "err", err)
+				continue
 			}
+			session = started
 		case "candidate":
 			if session != nil && msg.Candidate != nil {
 				session.AddCandidate(*msg.Candidate)
@@ -139,6 +139,40 @@ func main() {
 		session.Close()
 	}
 	slog.Info("exiting")
+}
+
+// startAgent picks the display to share — the user's own desktop, or a virtual
+// one — opens it, and tells the viewer we're ready. It exits on failure.
+func startAgent(cfg *config, out *output) (*Input, *webrtc.API, bool) {
+	virtual := false
+	if cfg.display == "auto" {
+		display, isVirtual, err := chooseDisplay(cfg.virtualSize, func(status string) {
+			out.send(message{Type: "status", Message: status})
+		})
+		if err != nil {
+			out.fail(err)
+		}
+		cfg.display, virtual = display, isVirtual
+	}
+	input, err := NewInput(cfg.display)
+	if err != nil {
+		out.fail(fmt.Errorf("can't open display %s: %w", cfg.display, err))
+	}
+	api, err := newWebRTCAPI(*cfg)
+	if err != nil {
+		out.fail(fmt.Errorf("webrtc setup: %w", err))
+	}
+
+	warning := ""
+	if !input.CanInject() {
+		warning = "This desktop ignores injected input, so the mouse and keyboard won't reach it. " +
+			"That usually means it's a Wayland session: log out of it and webdesk will start a virtual desktop instead."
+		slog.Warn("input is ignored by this display", "display", cfg.display)
+	}
+
+	slog.Info("ready", "display", cfg.display, "virtual", virtual, "input", input.CanInject())
+	out.send(message{Type: "ready", Display: cfg.display, Virtual: virtual, Warning: warning})
+	return input, api, virtual
 }
 
 // output writes newline-delimited JSON to stdout from any goroutine.

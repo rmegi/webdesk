@@ -2,26 +2,38 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/jezek/xgb"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
-// Session is one viewer's WebRTC connection: a screen video track out,
-// an "input" data channel in.
+// How often a viewer's plea for a keyframe may restart the encoder.
+const keyframeInterval = 2 * time.Second
+
+// Session is one viewer's WebRTC connection: the screen as a video track out,
+// and an "input" data channel carrying mouse and keyboard in, cursor shapes out.
 type Session struct {
-	pc      *webrtc.PeerConnection
-	track   *webrtc.TrackLocalStaticRTP
-	input   *Input
-	cfg     config
-	ctx     context.Context
-	cancel  context.CancelFunc
-	once    sync.Once
-	started atomic.Bool
-	stopped chan struct{} // closed when stream returns
+	pc       *webrtc.PeerConnection
+	track    *webrtc.TrackLocalStaticRTP
+	input    *Input
+	cfg      config
+	ctx      context.Context
+	cancel   context.CancelFunc
+	once     sync.Once
+	started  atomic.Bool
+	stopped  chan struct{} // closed when stream returns
+	keyframe chan struct{} // the viewer is missing a keyframe
+
+	mu           sync.Mutex
+	cursor       *xgb.Conn
+	closed       bool
+	lastKeyframe time.Time
 }
 
 func newSession(api *webrtc.API, iceServers []webrtc.ICEServer, input *Input, cfg config, send func(message), offer webrtc.SessionDescription) (*Session, error) {
@@ -30,7 +42,15 @@ func newSession(api *webrtc.API, iceServers []webrtc.ICEServer, input *Input, cf
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{pc: pc, input: input, cfg: cfg, ctx: ctx, cancel: cancel, stopped: make(chan struct{})}
+	s := &Session{
+		pc:       pc,
+		input:    input,
+		cfg:      cfg,
+		ctx:      ctx,
+		cancel:   cancel,
+		stopped:  make(chan struct{}),
+		keyframe: make(chan struct{}, 1),
+	}
 
 	s.track, err = webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{
 		MimeType:    webrtc.MimeTypeH264,
@@ -46,7 +66,7 @@ func newSession(api *webrtc.API, iceServers []webrtc.ICEServer, input *Input, cf
 		s.Close()
 		return nil, err
 	}
-	go drainRTCP(sender)
+	go s.readRTCP(sender)
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
@@ -71,6 +91,7 @@ func newSession(api *webrtc.API, iceServers []webrtc.ICEServer, input *Input, cf
 			return
 		}
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) { input.Handle(msg.Data) })
+		dc.OnOpen(func() { s.startCursor(dc) })
 	})
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
@@ -96,17 +117,76 @@ func (s *Session) AddCandidate(candidate webrtc.ICECandidateInit) {
 	}
 }
 
+// startCursor sends cursor shapes to the viewer, which draws them at the local
+// pointer. A missing XFIXES extension only costs us the cursor.
+func (s *Session) startCursor(dc *webrtc.DataChannel) {
+	conn, err := watchCursor(s.cfg.display, func(payload string) {
+		if err := dc.SendText(payload); err != nil {
+			slog.Debug("cursor send failed", "err", err)
+		}
+	})
+	if err != nil {
+		slog.Warn("cursor updates unavailable", "err", err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		conn.Close()
+		return
+	}
+	s.cursor = conn
+}
+
+// readRTCP watches the viewer's reports, which keeps the interceptors working
+// and tells us when it has lost the picture and needs a new keyframe.
+func (s *Session) readRTCP(sender *webrtc.RTPSender) {
+	for {
+		packets, _, err := sender.ReadRTCP()
+		if err != nil {
+			return
+		}
+		for _, packet := range packets {
+			switch packet.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				s.requestKeyframe()
+			}
+		}
+	}
+}
+
+// requestKeyframe restarts the encoder, the only way to get an immediate
+// keyframe out of ffmpeg. Rate-limited, because viewers ask repeatedly while
+// they wait for one.
+func (s *Session) requestKeyframe() {
+	s.mu.Lock()
+	if time.Since(s.lastKeyframe) < keyframeInterval {
+		s.mu.Unlock()
+		return
+	}
+	s.lastKeyframe = time.Now()
+	s.mu.Unlock()
+
+	select {
+	case s.keyframe <- struct{}{}:
+	default: // one is already pending
+	}
+}
+
 // stream runs the screen capture for as long as the session lives,
-// restarting ffmpeg if it dies.
+// restarting ffmpeg if it dies or a keyframe is needed.
 func (s *Session) stream() {
 	defer close(s.stopped)
 	for s.ctx.Err() == nil {
 		width, height, err := s.input.ScreenSize()
 		if err == nil {
-			err = capture(s.ctx, s.cfg.display, width, height, s.cfg.fps, s.track)
+			err = capture(s.ctx, s.cfg.display, width, height, s.cfg.fps, s.track, s.keyframe)
 		}
 		if s.ctx.Err() != nil {
 			return
+		}
+		if errors.Is(err, errKeyframeRestart) {
+			continue // straight back up: the viewer is waiting for the picture
 		}
 		slog.Warn("capture stopped, restarting", "err", err)
 		select {
@@ -119,6 +199,15 @@ func (s *Session) stream() {
 func (s *Session) Close() {
 	s.once.Do(func() {
 		s.cancel()
+		s.mu.Lock()
+		s.closed = true
+		cursor := s.cursor
+		s.cursor = nil
+		s.mu.Unlock()
+		if cursor != nil {
+			cursor.Close()
+		}
+
 		// Wait for ffmpeg to be reaped; the agent may exit right after Close.
 		if s.started.Load() {
 			select {
@@ -133,14 +222,4 @@ func (s *Session) Close() {
 		}
 		slog.Info("session closed")
 	})
-}
-
-// drainRTCP reads incoming RTCP so the interceptors (NACK, reports) keep working.
-func drainRTCP(sender *webrtc.RTPSender) {
-	buf := make([]byte, 1500)
-	for {
-		if _, _, err := sender.Read(buf); err != nil {
-			return
-		}
-	}
 }
