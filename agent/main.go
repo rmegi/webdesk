@@ -39,6 +39,7 @@ type message struct {
 	Display     string                     `json:"display,omitempty"`
 	Virtual     bool                       `json:"virtual,omitempty"`
 	VirtualSize string                     `json:"virtualSize,omitempty"`
+	Warning     string                     `json:"warning,omitempty"`
 	Message     string                     `json:"message,omitempty"`
 }
 
@@ -162,8 +163,15 @@ func startAgent(cfg *config, out *output) (*Input, *webrtc.API, bool) {
 		out.fail(fmt.Errorf("webrtc setup: %w", err))
 	}
 
-	slog.Info("ready", "display", cfg.display, "virtual", virtual)
-	out.send(message{Type: "ready", Display: cfg.display, Virtual: virtual})
+	warning := ""
+	if !input.CanInject() {
+		warning = "This desktop ignores injected input, so the mouse and keyboard won't reach it. " +
+			"That usually means it's a Wayland session: log out of it and webdesk will start a virtual desktop instead."
+		slog.Warn("input is ignored by this display", "display", cfg.display)
+	}
+
+	slog.Info("ready", "display", cfg.display, "virtual", virtual, "input", input.CanInject())
+	out.send(message{Type: "ready", Display: cfg.display, Virtual: virtual, Warning: warning})
 	return input, api, virtual
 }
 

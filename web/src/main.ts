@@ -11,7 +11,7 @@ interface Target {
 type Signal =
   | { type: "status"; message: string }
   | { type: "setup"; tools: string; packages: string[]; virtual: boolean }
-  | { type: "joined"; iceServers: RTCIceServer[]; virtual: boolean }
+  | { type: "joined"; iceServers: RTCIceServer[]; virtual: boolean; warning?: string }
   | { type: "bye"; message: string }
   | { type: "answer"; sdp: RTCSessionDescriptionInit }
   | { type: "candidate"; candidate: RTCIceCandidateInit }
@@ -50,6 +50,7 @@ let signalQueue = Promise.resolve();
 let statsTimer = 0;
 let streaming = false; // the video connected at least once in this attempt
 let ended = false; // an error was already shown for this attempt
+let warning = ""; // something the machine told us about this desktop
 
 // ---------- login ----------
 
@@ -114,6 +115,7 @@ function openSession(next: Target) {
   target = next;
   streaming = false;
   ended = false;
+  warning = "";
   loginEl.hidden = true;
   sessionEl.hidden = false;
   titleEl.textContent = `${next.username}@${next.host}`;
@@ -202,6 +204,7 @@ async function onSignal(msg: Signal) {
     case "joined":
       logoutBtn.hidden = !msg.virtual;
       if (msg.virtual) titleEl.textContent += " · virtual desktop";
+      warning = msg.warning ?? "";
       await startPeer(msg.iceServers);
       break;
     case "bye":
@@ -256,7 +259,7 @@ async function startPeer(iceServers: RTCIceServer[]) {
     switch (peer.connectionState) {
       case "connected":
         streaming = true;
-        setStatus("Connected", false);
+        setStatus(warning || "Connected", false);
         screenEl.focus();
         startStats(peer);
         break;

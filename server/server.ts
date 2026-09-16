@@ -8,6 +8,8 @@ import { homedir } from "node:os";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import type { Readable } from "node:stream";
 import ssh2, {
+  type AuthenticationType,
+  type AuthHandlerMiddleware,
   type Client,
   type ClientChannel,
   type KeyboardInteractiveAuthMethod,
@@ -148,10 +150,22 @@ async function keyAuth(username: string): Promise<SshAuth[]> {
 async function sshLogin(target: Target): Promise<Client> {
   const hostId = `${target.host}:${target.port}`;
   const known = (await readKnownHosts())[hostId];
-  const auth = target.password ? passwordAuth(target) : await keyAuth(target.username);
+  // With a password, still fall back to the configured keys if it is refused.
+  const keys = await keyAuth(target.username);
+  const auth = target.password ? [...passwordAuth(target), ...keys] : keys;
   if (auth.length === 0) throw new UserError("Enter a password.");
 
   let fingerprint = "";
+  let offered: AuthenticationType[] = [];
+  const queue = [...auth];
+  // Walk our methods in order, skipping any the machine doesn't accept.
+  const authHandler: AuthHandlerMiddleware = (authsLeft, _partialSuccess, next) => {
+    if (authsLeft?.length) offered = authsLeft;
+    while (queue.length > 0 && offered.length > 0 && !offered.includes(queue[0].type)) queue.shift();
+    const method = queue.shift();
+    next(method ?? (false as unknown as AuthenticationType));
+  };
+
   const ssh = await new Promise<Client>((resolve, reject) => {
     const client = new ssh2.Client();
     client.on("ready", () => resolve(client));
@@ -160,7 +174,7 @@ async function sshLogin(target: Target): Promise<Client> {
       host: target.host,
       port: target.port,
       username: target.username,
-      authHandler: auth,
+      authHandler,
       readyTimeout: 20_000,
       keepaliveInterval: 15_000,
       hostVerifier: (key: Buffer) => {
@@ -173,6 +187,15 @@ async function sshLogin(target: Target): Promise<Client> {
       throw new UserError(
         `${hostId} presented a different host key than last time (${fingerprint}). ` +
           `If the machine was reinstalled, remove its entry from server/data/known_hosts.json.`,
+      );
+    }
+    if ((err as { level?: string }).level === "client-authentication") {
+      const methods = offered.length > 0 ? offered.join(", ") : "none it would tell us about";
+      throw new UserError(
+        `${target.username}@${target.host} refused the login. The machine accepts: ${methods}. ` +
+          (target.password
+            ? "Check the username and the password; some accounts are set up for keys only."
+            : "No password was given, and none of the server's SSH keys were accepted."),
       );
     }
     throw err;
@@ -248,6 +271,20 @@ async function checkMachine(ssh: Client, agentPath: string): Promise<MachineChec
   } catch {
     throw new UserError(`Couldn't check the machine: ${lastLines(result.stderr) || "the agent gave no answer"}`);
   }
+}
+
+// Turns apt's noise into something worth reading.
+function describeAptFailure(output: string): string {
+  const text = output.trim();
+  if (/Could not get lock|lock-frontend|dpkg frontend lock/i.test(text)) {
+    return "The machine is busy installing something else, so apt is locked — automatic updates, usually. Try again in a minute.";
+  }
+  if (/No space left on device/i.test(text)) return "The machine has run out of disk space for the install.";
+  if (/Unable to locate package|has no installation candidate/i.test(text)) {
+    return `The machine's package lists don't offer what's needed: ${lastLines(text, 1)}`;
+  }
+  if (/incorrect password|Sorry, try again/i.test(text)) return "sudo refused the password on that machine.";
+  return `Installing failed: ${lastLines(text)}`;
 }
 
 function lastLines(text: string, count = 3): string {
@@ -375,7 +412,7 @@ wss.on("connection", (ws) => {
     channel.stderr.setEncoding("utf8");
     onLines(channel.stderr, (line) => console.log(`[${label}] ${line}`));
     onLines(channel, (line) => {
-      let msg: { type?: string; message?: string; virtual?: boolean };
+      let msg: { type?: string; message?: string; virtual?: boolean; warning?: string };
       try {
         msg = JSON.parse(line);
       } catch {
@@ -384,7 +421,7 @@ wss.on("connection", (ws) => {
       }
       if (msg.type === "ready") {
         status("Opening the screen…");
-        send(ws, { type: "joined", iceServers: ICE_SERVERS, virtual: msg.virtual === true });
+        send(ws, { type: "joined", iceServers: ICE_SERVERS, virtual: msg.virtual === true, warning: msg.warning });
       } else if (msg.type === "error") {
         end(msg.message);
       } else if (msg.type === "bye") {
@@ -417,13 +454,15 @@ wss.on("connection", (ws) => {
     if (ended) return;
 
     status(`Installing ${packages.join(", ")}… This can take a few minutes.`);
-    const apt = "DEBIAN_FRONTEND=noninteractive apt-get";
+    // Wait for any other apt on the machine — automatic updates, usually —
+    // instead of falling over on its lock.
+    const apt = "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180";
     const script = `${apt} update -qq && ${apt} install -y -qq --no-install-recommends ${packages.join(" ")}`;
     const result =
       check.sudo === "nopasswd"
         ? await run(client, `sudo -n sh -c '${script}'`)
         : await run(client, `sudo -S -p "" sh -c '${script}'`, Buffer.from(`${target.password}\n`));
-    if (result.code !== 0) throw new UserError(`Installing failed: ${lastLines(result.stderr || result.stdout)}`);
+    if (result.code !== 0) throw new UserError(describeAptFailure(result.stderr || result.stdout));
     console.log(`installed on ${target.host}: ${packages.join(" ")}`);
   }
 });
