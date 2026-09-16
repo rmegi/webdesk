@@ -34,6 +34,7 @@ const ICE_SERVERS: unknown[] = process.env.WEBDESK_ICE_SERVERS
   : [{ urls: ["stun:stun.l.google.com:19302"] }]; // pion requires urls to be an array
 const RELAYED = new Set(["offer", "candidate", "logout"]);
 const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*$/;
+const SCREEN_SIZE = /^\d{3,5}x\d{3,5}$/;
 const ARCHES: Record<string, string> = { x86_64: "amd64", aarch64: "arm64", arm64: "arm64" };
 const REMOTE_DIR = `"$HOME"/.cache/webdesk`;
 const MIME: Record<string, string> = {
@@ -48,6 +49,7 @@ interface Target {
   port: number;
   username: string;
   password: string;
+  size?: string; // the viewer's window, used for a new virtual desktop
 }
 
 /** What `webdesk-agent check` reports about a machine. */
@@ -97,7 +99,8 @@ function parseTarget(msg: Record<string, unknown>): Target | undefined {
     Number.isInteger(port) &&
     port >= 1 &&
     port <= 65535;
-  return valid ? { host: host.trim(), port, username: username.trim(), password } : undefined;
+  const size = typeof msg.size === "string" && SCREEN_SIZE.test(msg.size) ? msg.size : undefined;
+  return valid ? { host: host.trim(), port, username: username.trim(), password, size } : undefined;
 }
 
 // ---------- SSH ----------
@@ -392,7 +395,7 @@ wss.on("connection", (ws) => {
       }
     });
     channel.on("close", () => end("The agent on the machine stopped."));
-    channel.write(`${JSON.stringify({ type: "config", iceServers: ICE_SERVERS })}\n`);
+    channel.write(`${JSON.stringify({ type: "config", iceServers: ICE_SERVERS, virtualSize: target.size })}\n`);
   }
 
   // Installs what the machine is missing, once the viewer approves in the page.

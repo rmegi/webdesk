@@ -123,7 +123,7 @@ function openSession(next: Target) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const sock = new WebSocket(`${proto}://${location.host}/ws`);
   ws = sock;
-  sock.onopen = () => sock.send(JSON.stringify({ type: "connect", ...next }));
+  sock.onopen = () => sock.send(JSON.stringify({ type: "connect", ...next, size: desiredSize() }));
   sock.onmessage = (ev) => {
     if (ws !== sock) return;
     const msg = JSON.parse(ev.data) as Signal;
@@ -152,6 +152,38 @@ function closeSession() {
   video.srcObject = null;
   setupEl.hidden = true;
   logoutBtn.hidden = true;
+  screenEl.style.cursor = "";
+  cursorCache.clear();
+}
+
+// A new virtual desktop is made to fit the viewer's window. Both sides are
+// scaled together so the desktop keeps the window's proportions instead of
+// being stretched into an odd shape by the limits.
+function desiredSize(): string {
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  let width = (screenEl.clientWidth || window.innerWidth) * scale;
+  let height = (screenEl.clientHeight || window.innerHeight - 40) * scale;
+  const grow = Math.max(800 / width, 600 / height, 1);
+  width *= grow;
+  height *= grow;
+  const shrink = Math.min(3840 / width, 2160 / height, 1);
+  width *= shrink;
+  height *= shrink;
+  return `${Math.round(width) & ~1}x${Math.round(height) & ~1}`;
+}
+
+// The agent sends the remote cursor's shape, which the browser draws at the
+// local pointer: no round trip, so it keeps up with the mouse.
+const cursorCache = new Map<number, string>();
+
+function applyCursor(msg: { serial: number; w?: number; h?: number; xhot?: number; yhot?: number; png?: string }) {
+  if (msg.png) {
+    // Browsers ignore cursors bigger than 128px and then show nothing.
+    const tooBig = (msg.w ?? 0) > 128 || (msg.h ?? 0) > 128;
+    const style = tooBig ? "default" : `url("data:image/png;base64,${msg.png}") ${msg.xhot ?? 0} ${msg.yhot ?? 0}, auto`;
+    cursorCache.set(msg.serial, style);
+  }
+  screenEl.style.cursor = cursorCache.get(msg.serial) ?? "default";
 }
 
 async function onSignal(msg: Signal) {
@@ -198,7 +230,16 @@ async function startPeer(iceServers: RTCIceServer[]) {
   const peer = new RTCPeerConnection({ iceServers });
   pc = peer;
   peer.addTransceiver("video", { direction: "recvonly" });
-  dc = peer.createDataChannel("input", { ordered: true });
+  const channel = peer.createDataChannel("input", { ordered: true });
+  dc = channel;
+  channel.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === "cursor") applyCursor(msg);
+    } catch {
+      // Ignore anything we don't understand.
+    }
+  };
 
   peer.ontrack = (ev) => {
     // Ask the browser to render frames as soon as they arrive instead of buffering.
@@ -329,7 +370,9 @@ screenEl.addEventListener(
   (ev) => {
     ev.preventDefault();
     // Convert to wheel "notches": ~100px or 3 lines per notch.
-    const unit = ev.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 1 : ev.deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 / 3 : 1 / 100;
+    // A notch is a page, 3 lines, or ~100px from a wheel and ~40px from a trackpad.
+    const pixels = Math.max(Math.abs(ev.deltaX), Math.abs(ev.deltaY)) >= 80 ? 100 : 40;
+    const unit = ev.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 1 : ev.deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 / 3 : 1 / pixels;
     wheelX += ev.deltaX * unit;
     wheelY += ev.deltaY * unit;
     const dx = Math.trunc(wheelX);
@@ -356,6 +399,17 @@ function codeFor(ev: KeyboardEvent): string {
   return KEY_TO_CODE[ev.key] ?? ev.key; // named keys (Enter, ArrowUp, F5…) share their code name
 }
 
+// On a Mac, Cmd sits where Ctrl is on a PC keyboard, so send it as Ctrl and the
+// usual shortcuts (copy, paste, select all) work on the remote machine.
+const IS_MAC = /Mac/i.test(navigator.userAgent);
+
+function remoteCode(code: string): string {
+  if (!IS_MAC) return code;
+  if (code === "MetaLeft") return "ControlLeft";
+  if (code === "MetaRight") return "ControlRight";
+  return code;
+}
+
 const pressedKeys = new Set<string>();
 
 function releaseKeys(includeModifiers: boolean) {
@@ -368,7 +422,7 @@ function releaseKeys(includeModifiers: boolean) {
 
 screenEl.addEventListener("keydown", (ev) => {
   ev.preventDefault();
-  const code = codeFor(ev);
+  const code = remoteCode(codeFor(ev));
   // The remote X server auto-repeats held keys itself.
   if (ev.repeat || !code) return;
   pressedKeys.add(code);
@@ -377,12 +431,13 @@ screenEl.addEventListener("keydown", (ev) => {
 
 screenEl.addEventListener("keyup", (ev) => {
   ev.preventDefault();
-  const code = codeFor(ev);
+  const pressed = codeFor(ev);
+  const code = remoteCode(pressed);
   if (!code) return;
   pressedKeys.delete(code);
   sendInput({ t: "key", code, down: false });
   // macOS never fires keyup for keys released while Cmd is held.
-  if (code === "MetaLeft" || code === "MetaRight") releaseKeys(false);
+  if (pressed === "MetaLeft" || pressed === "MetaRight") releaseKeys(false);
 });
 
 screenEl.addEventListener("blur", () => releaseKeys(true));
