@@ -31,6 +31,7 @@
         </label>
         <button id="connect" type="submit">Connect</button>
         <p id="login-error" class="error" role="alert" hidden></p>
+        <p id="login-note" class="note" role="status" hidden></p>
       </form>
     </main>
 
@@ -41,12 +42,24 @@
         <span id="status"></span>
         <span id="hud"></span>
         <span class="spacer"></span>
+        <button id="logout" type="button" hidden>Log out</button>
         <button id="reconnect" type="button">Reconnect</button>
         <button id="fullscreen" type="button">Fullscreen</button>
       </header>
-      <div id="screen" tabindex="0">
-        <video id="video" autoplay muted playsinline disablepictureinpicture></video>
-        <div id="overlay"></div>
+      <div id="stage">
+        <div id="screen" tabindex="0">
+          <video id="video" autoplay muted playsinline disablepictureinpicture></video>
+          <div id="overlay"></div>
+        </div>
+        <div id="setup" role="dialog" aria-labelledby="setup-title" hidden>
+          <h2 id="setup-title">Set up this machine</h2>
+          <p id="setup-text"></p>
+          <code id="setup-command"></code>
+          <div class="actions">
+            <button id="setup-cancel" type="button">Cancel</button>
+            <button id="setup-install" type="button">Install and connect</button>
+          </div>
+        </div>
       </div>
     </section>
 

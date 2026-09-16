@@ -10,7 +10,9 @@ interface Target {
 
 type Signal =
   | { type: "status"; message: string }
-  | { type: "joined"; iceServers: RTCIceServer[] }
+  | { type: "setup"; tools: string; packages: string[]; virtual: boolean }
+  | { type: "joined"; iceServers: RTCIceServer[]; virtual: boolean }
+  | { type: "bye"; message: string }
   | { type: "answer"; sdp: RTCSessionDescriptionInit }
   | { type: "candidate"; candidate: RTCIceCandidateInit }
   | { type: "error"; message: string };
@@ -20,6 +22,7 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.qu
 const loginEl = $("#login");
 const form = $<HTMLFormElement>("#login-form");
 const loginError = $("#login-error");
+const loginNote = $("#login-note");
 const sessionEl = $("#session");
 const titleEl = $("#title");
 const statusEl = $("#status");
@@ -27,6 +30,10 @@ const hudEl = $("#hud");
 const screenEl = $("#screen");
 const overlayEl = $("#overlay");
 const video = $<HTMLVideoElement>("#video");
+const setupEl = $("#setup");
+const setupText = $("#setup-text");
+const setupCommand = $("#setup-command");
+const logoutBtn = $<HTMLButtonElement>("#logout");
 
 const SAVED_TARGET = "webdesk:last-target";
 const MODIFIERS = new Set([
@@ -50,12 +57,14 @@ function field(name: string) {
   return form.elements.namedItem(name) as HTMLInputElement;
 }
 
-function showLogin(error?: string) {
+function showLogin(error?: string, note?: string) {
   closeSession();
   sessionEl.hidden = true;
   loginEl.hidden = false;
   loginError.textContent = error ?? "";
   loginError.hidden = !error;
+  loginNote.textContent = note ?? "";
+  loginNote.hidden = !note;
   (field("host").value ? field("password") : field("host")).focus();
 }
 
@@ -141,6 +150,8 @@ function closeSession() {
   pc = null;
   pendingCandidates = [];
   video.srcObject = null;
+  setupEl.hidden = true;
+  logoutBtn.hidden = true;
 }
 
 async function onSignal(msg: Signal) {
@@ -148,8 +159,22 @@ async function onSignal(msg: Signal) {
     case "status":
       if (!streaming) setStatus(msg.message, true);
       break;
+    case "setup":
+      setStatus("Setup needed", false);
+      setupText.textContent = msg.virtual
+        ? `There's no X11 desktop on this machine's screen, so webdesk will start a virtual desktop. First it needs ${msg.tools}, which webdesk can install now:`
+        : `This machine needs ${msg.tools}, which webdesk can install now:`;
+      setupCommand.textContent = `sudo apt-get install ${msg.packages.join(" ")}`;
+      setupEl.hidden = false;
+      break;
     case "joined":
+      logoutBtn.hidden = !msg.virtual;
+      if (msg.virtual) titleEl.textContent += " · virtual desktop";
       await startPeer(msg.iceServers);
+      break;
+    case "bye":
+      ended = true;
+      showLogin(undefined, msg.message);
       break;
     case "answer":
       if (!pc) return;
@@ -365,6 +390,19 @@ screenEl.addEventListener("blur", () => releaseKeys(true));
 // ---------- toolbar ----------
 
 $("#disconnect").onclick = () => showLogin();
+
+$("#setup-install").onclick = () => {
+  setupEl.hidden = true;
+  setStatus("Installing…", true);
+  signal({ type: "install" });
+};
+
+$("#setup-cancel").onclick = () => showLogin();
+
+logoutBtn.onclick = () => {
+  setStatus("Logging out…", true);
+  signal({ type: "logout" });
+};
 
 $("#reconnect").onclick = () => {
   if (target) openSession(target);

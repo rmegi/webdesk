@@ -114,6 +114,11 @@ button:hover {
   margin: 0;
 }
 
+.note {
+  color: var(--muted);
+  margin: 0;
+}
+
 /* Session */
 #session {
   height: 100%;
@@ -142,13 +147,66 @@ button:hover {
   flex: 1;
 }
 
-#screen {
+#stage {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+#screen {
+  position: absolute;
+  inset: 0;
   background: #000;
   outline: none;
   touch-action: none;
+}
+
+#setup {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100% - 32px));
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+#setup h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+#setup p {
+  margin: 0;
+  color: var(--muted);
+}
+
+#setup code {
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#setup-install {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 #screen:focus-visible {
