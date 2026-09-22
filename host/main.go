@@ -1,4 +1,4 @@
-// webdesk agent: shares this machine's X11 screen with a browser over WebRTC
+// webdesk host: shares this machine's X11 screen with a browser over WebRTC
 // and replays the viewer's mouse and keyboard input.
 //
 // The webdesk server starts it over SSH as the logged-in user and talks to it
@@ -103,7 +103,7 @@ func main() {
 				cfg.virtualSize = msg.VirtualSize
 			}
 			if input == nil {
-				input, api, virtual = startAgent(&cfg, out)
+				input, api, virtual = startHost(&cfg, out)
 			}
 		case "offer":
 			if msg.SDP == nil || input == nil {
@@ -141,9 +141,9 @@ func main() {
 	slog.Info("exiting")
 }
 
-// startAgent picks the display to share — the user's own desktop, or a virtual
+// startHost picks the display to share — the user's own desktop, or a virtual
 // one — opens it, and tells the viewer we're ready. It exits on failure.
-func startAgent(cfg *config, out *output) (*Input, *webrtc.API, bool) {
+func startHost(cfg *config, out *output) (*Input, *webrtc.API, bool) {
 	virtual := false
 	if cfg.display == "auto" {
 		display, isVirtual, err := chooseDisplay(cfg.virtualSize, func(status string) {
@@ -238,7 +238,7 @@ func newWebRTCAPI(cfg config) (*webrtc.API, error) {
 	), nil
 }
 
-// retry rides out a previous agent that is still releasing a fixed port.
+// retry rides out a previous host that is still releasing a fixed port.
 func retry[T any](fn func() (T, error)) (T, error) {
 	var v T
 	var err error

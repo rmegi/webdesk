@@ -128,14 +128,14 @@ func stopVirtualDesktop(desktop virtualDesktop) {
 }
 
 // startDetached runs cmd in its own session with output to log, so it outlives
-// the agent and the SSH connection.
+// the host and the SSH connection.
 func startDetached(cmd *exec.Cmd, log *os.File) error {
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait() // reap it if it exits while the agent is still running
+	go cmd.Wait() // reap it if it exits while the host is still running
 	return nil
 }
 

@@ -176,7 +176,7 @@ function desiredSize(): string {
   return `${Math.round(width) & ~1}x${Math.round(height) & ~1}`;
 }
 
-// The agent sends the remote cursor's shape, which the browser draws at the
+// The host sends the remote cursor's shape, which the browser draws at the
 // local pointer: no round trip, so it keeps up with the mouse.
 const cursorCache = new Map<number, string>();
 

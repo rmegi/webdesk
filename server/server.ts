@@ -1,6 +1,6 @@
 // webdesk server: serves the web client and, for each viewer, logs in to the
-// requested machine over SSH, starts the agent there and relays WebRTC
-// signaling between browser and agent. Video and input flow peer-to-peer.
+// requested machine over SSH, starts the host program there and relays WebRTC
+// signaling between browser and host. Video and input flow peer-to-peer.
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -24,7 +24,7 @@ const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const ROOT = join(import.meta.dirname, "..");
 const WEB_ROOT = join(ROOT, "web");
-const AGENT_DIR = join(ROOT, "agent", "dist");
+const HOST_DIR = join(ROOT, "host", "dist");
 const KNOWN_HOSTS_FILE = join(ROOT, "server", "data", "known_hosts.json");
 // Optional private keys (comma-separated paths), tried when the viewer leaves the password empty.
 const SSH_KEY_FILES = (process.env.WEBDESK_SSH_KEY ?? "")
@@ -54,7 +54,7 @@ interface Target {
   size?: string; // the viewer's window, used for a new virtual desktop
 }
 
-/** What `webdesk-agent check` reports about a machine. */
+/** What `webdesk-host check` reports about a machine. */
 interface MachineCheck {
   virtual: boolean; // no X11 desktop on the monitor, so a virtual one will be used
   missing: string[] | null; // commands that aren't installed ("desktop" = no desktop environment)
@@ -239,37 +239,37 @@ function onLines(stream: Readable, handler: (line: string) => void) {
   });
 }
 
-// Makes sure this build of the agent is on the machine; returns its remote path.
-async function installAgent(ssh: Client, status: (message: string) => void): Promise<string> {
+// Makes sure this build of the host program is on the machine; returns its remote path.
+async function installHost(ssh: Client, status: (message: string) => void): Promise<string> {
   const machine = (await run(ssh, "uname -m")).stdout.trim();
   const arch = ARCHES[machine];
   if (!arch) throw new UserError(`webdesk doesn't support this machine's CPU (${machine || "unknown"}) yet.`);
 
-  const binary = await readFile(join(AGENT_DIR, `webdesk-agent-linux-${arch}`)).catch(() => {
-    throw new UserError(`The linux/${arch} agent isn't built. Run "pnpm build:agent" on the server.`);
+  const binary = await readFile(join(HOST_DIR, `webdesk-host-linux-${arch}`)).catch(() => {
+    throw new UserError(`The linux/${arch} host program isn't built. Run "pnpm build:host" on the server.`);
   });
-  const name = `webdesk-agent-${createHash("sha256").update(binary).digest("hex").slice(0, 12)}`;
+  const name = `webdesk-host-${createHash("sha256").update(binary).digest("hex").slice(0, 12)}`;
   const path = `${REMOTE_DIR}/${name}`;
   if ((await run(ssh, `sh -c 'test -x ${path}'`)).code === 0) return path;
 
-  status("Installing the agent…");
+  status("Installing webdesk on the machine…");
   const install = await run(
     ssh,
-    `sh -c 'mkdir -p ${REMOTE_DIR} && rm -f ${REMOTE_DIR}/webdesk-agent-* && cat > ${path}.tmp && chmod 755 ${path}.tmp && mv ${path}.tmp ${path}'`,
+    `sh -c 'mkdir -p ${REMOTE_DIR} && rm -f ${REMOTE_DIR}/webdesk-* && cat > ${path}.tmp && chmod 755 ${path}.tmp && mv ${path}.tmp ${path}'`,
     binary,
   );
   if (install.code !== 0) {
-    throw new UserError(`Couldn't install the agent: ${install.stderr.trim() || `exit code ${install.code}`}`);
+    throw new UserError(`Couldn't install webdesk on the machine: ${install.stderr.trim() || `exit code ${install.code}`}`);
   }
   return path;
 }
 
-async function checkMachine(ssh: Client, agentPath: string): Promise<MachineCheck> {
-  const result = await run(ssh, `sh -c '${agentPath} check'`);
+async function checkMachine(ssh: Client, hostPath: string): Promise<MachineCheck> {
+  const result = await run(ssh, `sh -c '${hostPath} check'`);
   try {
     return JSON.parse(result.stdout);
   } catch {
-    throw new UserError(`Couldn't check the machine: ${lastLines(result.stderr) || "the agent gave no answer"}`);
+    throw new UserError(`Couldn't check the machine: ${lastLines(result.stderr) || "webdesk gave no answer"}`);
   }
 }
 
@@ -328,7 +328,7 @@ wss.on("connection", (ws) => {
   let started = false;
   let ended = false;
   let ssh: Client | undefined;
-  let agent: ClientChannel | undefined;
+  let hostChannel: ClientChannel | undefined;
   let approveInstall: (() => void) | undefined;
 
   const status = (message: string) => send(ws, { type: "status", message });
@@ -337,12 +337,12 @@ wss.on("connection", (ws) => {
     ended = true;
     if (error) send(ws, { type: "error", message: error });
     ws.close();
-    // Closing the agent's stdin tells it to stop; give it a moment to clean up
+    // Closing the host program's stdin tells it to stop; give it a moment to clean up
     // (and log) before dropping the SSH connection.
     const client = ssh;
-    if (agent) {
-      agent.once("close", () => client?.end());
-      agent.end();
+    if (hostChannel) {
+      hostChannel.once("close", () => client?.end());
+      hostChannel.end();
       setTimeout(() => client?.end(), 5_000).unref();
     } else {
       client?.end();
@@ -370,7 +370,7 @@ wss.on("connection", (ws) => {
       approveInstall?.();
       return;
     }
-    if (agent && typeof msg.type === "string" && RELAYED.has(msg.type)) agent.write(`${JSON.stringify(msg)}\n`);
+    if (hostChannel && typeof msg.type === "string" && RELAYED.has(msg.type)) hostChannel.write(`${JSON.stringify(msg)}\n`);
   });
   ws.on("close", () => {
     end();
@@ -391,19 +391,19 @@ wss.on("connection", (ws) => {
     console.log(`logged in: ${label}`);
 
     status("Checking the machine…");
-    const agentPath = await installAgent(client, status);
-    let check = await checkMachine(client, agentPath);
+    const hostPath = await installHost(client, status);
+    let check = await checkMachine(client, hostPath);
     if (check.missing?.length) {
       await setUpMachine(client, target, check);
       if (ended) return;
-      check = await checkMachine(client, agentPath);
+      check = await checkMachine(client, hostPath);
       if (check.missing?.length) throw new UserError(`Still missing after installing: ${check.missing.join(", ")}.`);
     }
     if (ended) return;
 
-    status("Starting the agent…");
-    const channel = await exec(client, `sh -c 'exec ${agentPath}'`);
-    agent = channel;
+    status("Starting webdesk on the machine…");
+    const channel = await exec(client, `sh -c 'exec ${hostPath}'`);
+    hostChannel = channel;
     if (ended) {
       channel.end();
       return;
@@ -431,7 +431,7 @@ wss.on("connection", (ws) => {
         send(ws, msg); // status, answer, candidate
       }
     });
-    channel.on("close", () => end("The agent on the machine stopped."));
+    channel.on("close", () => end("webdesk stopped on the machine."));
     channel.write(`${JSON.stringify({ type: "config", iceServers: ICE_SERVERS, virtualSize: target.size })}\n`);
   }
 

@@ -1,4 +1,4 @@
-module webdesk/agent
+module webdesk/host
 
 go 1.27.1
 

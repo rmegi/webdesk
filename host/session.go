@@ -259,7 +259,7 @@ func (s *Session) Close() {
 			clipboard.Close()
 		}
 
-		// Wait for ffmpeg to be reaped; the agent may exit right after Close.
+		// Wait for ffmpeg to be reaped; the host may exit right after Close.
 		if s.started.Load() {
 			select {
 			case <-s.stopped:
