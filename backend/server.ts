@@ -23,9 +23,9 @@ const PORT = Number(process.env.PORT ?? 8080);
 // who can open it can use this server to reach machines over SSH.
 const HOST = process.env.HOST ?? "127.0.0.1";
 const ROOT = join(import.meta.dirname, "..");
-const WEB_ROOT = join(ROOT, "web");
+const FRONTEND_ROOT = join(ROOT, "frontend");
 const HOST_DIR = join(ROOT, "host", "dist");
-const KNOWN_HOSTS_FILE = join(ROOT, "server", "data", "known_hosts.json");
+const KNOWN_HOSTS_FILE = join(ROOT, "backend", "data", "known_hosts.json");
 // Optional private keys (comma-separated paths), tried when the viewer leaves the password empty.
 const SSH_KEY_FILES = (process.env.WEBDESK_SSH_KEY ?? "")
   .split(",")
@@ -73,8 +73,8 @@ function send(ws: WebSocket, msg: object) {
 
 async function handleHttp(req: IncomingMessage, res: ServerResponse) {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
-  const file = normalize(join(WEB_ROOT, pathname === "/" ? "index.html" : pathname));
-  if (!file.startsWith(WEB_ROOT + sep)) {
+  const file = normalize(join(FRONTEND_ROOT, pathname === "/" ? "index.html" : pathname));
+  if (!file.startsWith(FRONTEND_ROOT + sep)) {
     res.writeHead(403).end();
     return;
   }
@@ -186,7 +186,7 @@ async function sshLogin(target: Target): Promise<Client> {
     if (known && fingerprint && known !== fingerprint) {
       throw new UserError(
         `${hostId} presented a different host key than last time (${fingerprint}). ` +
-          `If the machine was reinstalled, remove its entry from server/data/known_hosts.json.`,
+          `If the machine was reinstalled, remove its entry from backend/data/known_hosts.json.`,
       );
     }
     if ((err as { level?: string }).level === "client-authentication") {
