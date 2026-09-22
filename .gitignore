@@ -1,5 +1,5 @@
 node_modules/
-web/dist/
+frontend/dist/
 host/dist/
-server/data/
+backend/data/
 dev/ssh/

@@ -12,7 +12,7 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
    └────────── WebRTC: video + input ─────────────┘
 ```
 
-1. The browser sends the login to the **webdesk server** (`server/`).
+1. The browser sends the login to the **webdesk server** (`backend/`).
 2. The server logs in over SSH, uploads the **host program** (`host/`) to
    `~/.cache/webdesk/` if this build isn't there yet, and starts it as that user.
 3. The host program checks what the machine is missing (ffmpeg, or what a
@@ -48,10 +48,10 @@ X11 desktop instead.
 ## Project layout
 
 ```
-host/     Go program that runs on the target: screen capture, WebRTC, input
-server/   Node server: serves the page, SSH login, signaling relay
-web/      Browser client (TypeScript, compiled with tsc)
-dev/      Docker test machine: SSH server + XFCE on a virtual screen
+host/      Go program that runs on the target: screen capture, WebRTC, input
+backend/   Node server: serves the page, SSH login, signaling relay
+frontend/  Browser client (TypeScript, compiled with tsc)
+dev/       Docker test machine: SSH server + XFCE on a virtual screen
 ```
 
 ## Running
@@ -109,7 +109,7 @@ Host program environment variables, read from the SSH session's environment:
 
 - The web page has **no login of its own yet**. Anyone who can open it can use
   the server to try SSH logins, so it listens on localhost only by default.
-- Host keys are pinned on first connect in `server/data/known_hosts.json`. A
+- Host keys are pinned on first connect in `backend/data/known_hosts.json`. A
   changed key is refused.
 - Passwords are used only for the SSH login. They aren't logged or stored, and
   the browser remembers only host, port and username.

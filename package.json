@@ -8,12 +8,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p web && node --run build:host",
+    "build": "tsc -p frontend && node --run build:host",
     "build:host": "cd host && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-host-linux-amd64 . && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-host-linux-arm64 .",
-    "dev": "node --run build && (tsc -p web --watch --preserveWatchOutput & WEBDESK_SSH_KEY=${WEBDESK_SSH_KEY:-dev/ssh/id_ed25519} node --watch server/server.ts)",
+    "dev": "node --run build && (tsc -p frontend --watch --preserveWatchOutput & WEBDESK_SSH_KEY=${WEBDESK_SSH_KEY:-dev/ssh/id_ed25519} node --watch backend/server.ts)",
     "dev:target": "(test -f dev/ssh/id_ed25519 || (mkdir -p dev/ssh && ssh-keygen -q -t ed25519 -N '' -C webdesk-dev -f dev/ssh/id_ed25519)) && docker compose up -d --build",
-    "start": "node --run build && node server/server.ts",
-    "typecheck": "tsc -p server && tsc -p web --noEmit"
+    "start": "node --run build && node backend/server.ts",
+    "typecheck": "tsc -p backend && tsc -p frontend --noEmit"
   },
   "dependencies": {
     "ssh2": "^1.17.0",
