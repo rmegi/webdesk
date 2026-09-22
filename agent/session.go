@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -32,6 +33,7 @@ type Session struct {
 
 	mu           sync.Mutex
 	cursor       *xgb.Conn
+	clipboard    *Clipboard
 	closed       bool
 	lastKeyframe time.Time
 }
@@ -90,8 +92,11 @@ func newSession(api *webrtc.API, iceServers []webrtc.ICEServer, input *Input, cf
 		if dc.Label() != "input" {
 			return
 		}
-		dc.OnMessage(func(msg webrtc.DataChannelMessage) { input.Handle(msg.Data) })
-		dc.OnOpen(func() { s.startCursor(dc) })
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) { s.handle(msg.Data) })
+		dc.OnOpen(func() {
+			s.startCursor(dc)
+			s.startClipboard(dc)
+		})
 	})
 
 	if err := pc.SetRemoteDescription(offer); err != nil {
@@ -136,6 +141,48 @@ func (s *Session) startCursor(dc *webrtc.DataChannel) {
 		return
 	}
 	s.cursor = conn
+}
+
+// handle routes a message from the viewer: clipboard text, or an input event.
+func (s *Session) handle(data []byte) {
+	var msg struct {
+		T    string `json:"t"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	if msg.T != "clipboard" {
+		s.input.Handle(data)
+		return
+	}
+	s.mu.Lock()
+	clipboard := s.clipboard
+	s.mu.Unlock()
+	if clipboard != nil {
+		clipboard.SetFromViewer(msg.Text)
+	}
+}
+
+// startClipboard keeps the machine's clipboard and the viewer's in step.
+// Without XFIXES we simply go without it.
+func (s *Session) startClipboard(dc *webrtc.DataChannel) {
+	clipboard, err := NewClipboard(s.cfg.display, func(payload string) {
+		if err := dc.SendText(payload); err != nil {
+			slog.Debug("clipboard send failed", "err", err)
+		}
+	})
+	if err != nil {
+		slog.Warn("clipboard sharing unavailable", "err", err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		clipboard.Close()
+		return
+	}
+	s.clipboard = clipboard
 }
 
 // readRTCP watches the viewer's reports, which keeps the interceptors working
@@ -202,10 +249,14 @@ func (s *Session) Close() {
 		s.mu.Lock()
 		s.closed = true
 		cursor := s.cursor
-		s.cursor = nil
+		clipboard := s.clipboard
+		s.cursor, s.clipboard = nil, nil
 		s.mu.Unlock()
 		if cursor != nil {
 			cursor.Close()
+		}
+		if clipboard != nil {
+			clipboard.Close()
 		}
 
 		// Wait for ffmpeg to be reaped; the agent may exit right after Close.

@@ -156,6 +156,8 @@ function closeSession() {
   logoutBtn.hidden = true;
   screenEl.style.cursor = "";
   cursorCache.clear();
+  pendingClipboard = "";
+  heldPaste = null;
 }
 
 // A new virtual desktop is made to fit the viewer's window. Both sides are
@@ -239,6 +241,7 @@ async function startPeer(iceServers: RTCIceServer[]) {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.t === "cursor") applyCursor(msg);
+      else if (msg.t === "clipboard") void writeClipboard(msg.text);
     } catch {
       // Ignore anything we don't understand.
     }
@@ -413,6 +416,45 @@ function remoteCode(code: string): string {
   return code;
 }
 
+// Copying on the machine puts the text on your clipboard. The browser only
+// allows that while the page has focus, so hold it until it does.
+let pendingClipboard = "";
+
+async function writeClipboard(text: string) {
+  if (typeof text !== "string" || text === "") return;
+  pendingClipboard = text;
+  if (!document.hasFocus()) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    pendingClipboard = "";
+  } catch {
+    // Refused for now; the next focus tries again.
+  }
+}
+
+window.addEventListener("focus", () => {
+  if (pendingClipboard) void writeClipboard(pendingClipboard);
+});
+
+// Pasting into the page hands us your clipboard without a permission prompt.
+document.addEventListener("paste", (ev) => {
+  const text = ev.clipboardData?.getData("text/plain") ?? "";
+  if (text) sendInput({ t: "clipboard", text });
+  releasePaste();
+});
+
+// The paste keystroke is held back for a moment so the machine has the text
+// before the key reaches the program you're pasting into.
+let heldPaste: { code: string; timer: number } | null = null;
+
+function releasePaste() {
+  if (!heldPaste) return;
+  const { code, timer } = heldPaste;
+  heldPaste = null;
+  clearTimeout(timer);
+  sendInput({ t: "key", code, down: true });
+}
+
 const pressedKeys = new Set<string>();
 
 function releaseKeys(includeModifiers: boolean) {
@@ -429,11 +471,16 @@ screenEl.addEventListener("keydown", (ev) => {
   // The remote X server auto-repeats held keys itself.
   if (ev.repeat || !code) return;
   pressedKeys.add(code);
+  if (code === "KeyV" && (ev.metaKey || ev.ctrlKey) && !heldPaste) {
+    heldPaste = { code, timer: window.setTimeout(releasePaste, 80) };
+    return;
+  }
   sendInput({ t: "key", code, down: true });
 });
 
 screenEl.addEventListener("keyup", (ev) => {
   ev.preventDefault();
+  releasePaste(); // never let the key go up before it went down
   const pressed = codeFor(ev);
   const code = remoteCode(pressed);
   if (!code) return;
