@@ -14,7 +14,7 @@ import (
 
 // X11 has no clipboard daemon: whichever program copied something owns the
 // CLIPBOARD selection and hands the text over when another program pastes. So
-// the agent keeps a window of its own to hold the viewer's clipboard for the
+// the host keeps a window of its own to hold the viewer's clipboard for the
 // machine, and asks the current owner for text whenever someone else copies.
 
 const maxClipboardBytes = 1 << 20 // clipboards here are text; 1 MiB is plenty

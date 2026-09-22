@@ -7,7 +7,7 @@ import (
 )
 
 // checkResult tells the server what the machine still needs before a session
-// can start. It is printed by `webdesk-agent check`.
+// can start. It is printed by `webdesk-host check`.
 type checkResult struct {
 	Virtual  bool     `json:"virtual"`        // no X11 desktop on the monitor, so a virtual one will be used
 	Missing  []string `json:"missing"`        // commands that aren't installed; "desktop" means no desktop environment

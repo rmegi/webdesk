@@ -20,15 +20,15 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: agent/go.mod
-          cache-dependency-path: agent/go.sum
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
 
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm typecheck
 
       - name: Go format and vet
-        working-directory: agent
+        working-directory: host
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
@@ -37,5 +37,5 @@ jobs:
           fi
           go vet ./...
 
-      - name: Build web client and agent binaries
+      - name: Build web client and host binaries
         run: pnpm build

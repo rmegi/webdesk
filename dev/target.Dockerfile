@@ -20,7 +20,7 @@ RUN apt-get update \
 RUN useradd --create-home --shell /bin/bash desk
 RUN echo 'desk:desk' | chpasswd && mkdir -p /run/sshd
 
-# Docker hides the container's IP from the browser, so pin the agent's WebRTC
+# Docker hides the container's IP from the browser, so pin the host's WebRTC
 # traffic to one published port and advertise it as localhost. sshd passes
 # /etc/environment to SSH sessions through pam_env.
 RUN printf 'WEBDESK_ICE_PORT=50000\nWEBDESK_ICE_HOST_IP=127.0.0.1\n' >> /etc/environment

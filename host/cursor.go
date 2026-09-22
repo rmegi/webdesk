@@ -16,7 +16,7 @@ import (
 )
 
 // The viewer draws the remote cursor itself, at the local pointer, so it never
-// lags a network round trip behind the mouse. The agent only sends the cursor's
+// lags a network round trip behind the mouse. The host only sends the cursor's
 // picture when its shape changes, and the capture leaves the cursor out of the
 // video entirely.
 

@@ -13,23 +13,24 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
 ```
 
 1. The browser sends the login to the **webdesk server** (`server/`).
-2. The server logs in over SSH, uploads the **agent** (`agent/`) to
+2. The server logs in over SSH, uploads the **host program** (`host/`) to
    `~/.cache/webdesk/` if this build isn't there yet, and starts it as that user.
-3. The agent checks what the machine is missing (ffmpeg, or what a virtual
-   desktop needs). The page lists it and installs it with `sudo apt-get` only
-   after you confirm.
-4. The agent shows the user's X11 desktop on the machine's monitor. If there
-   isn't one (no monitor, or a Wayland desktop), it starts a **virtual X11
+3. The host program checks what the machine is missing (ffmpeg, or what a
+   virtual desktop needs). The page lists it and installs it with `sudo apt-get`
+   only after you confirm.
+4. The host program shows the user's X11 desktop on the machine's monitor. If
+   there isn't one (no monitor, or a Wayland desktop), it starts a **virtual X11
    desktop** on Xvfb with the machine's own desktop environment. The virtual
    desktop keeps running when you disconnect; **Log out** ends it.
 5. The screen is captured with ffmpeg (H.264) and streamed to the browser over
    WebRTC. Mouse and keyboard come back over a WebRTC data channel and are
    replayed with XTEST. The cursor is kept out of the video and sent as a
    picture, so the browser draws it at your pointer with no network wait. The
-   clipboard travels the same channel both ways: the agent holds the machine's
-   X selection on your behalf and hands the text over when something pastes.
+   clipboard travels the same channel both ways: the host program holds the
+   machine's X selection on your behalf and hands the text over when something
+   pastes.
 6. The server only relays connection setup (offer, answer, ICE candidates)
-   between browser and agent, through the SSH session. Video and input go
+   between browser and host, through the SSH session. Video and input go
    peer-to-peer.
 
 ## Target machine requirements
@@ -47,7 +48,7 @@ X11 desktop instead.
 ## Project layout
 
 ```
-agent/    Go agent that runs on the target: screen capture, WebRTC, input
+host/     Go program that runs on the target: screen capture, WebRTC, input
 server/   Node server: serves the page, SSH login, signaling relay
 web/      Browser client (TypeScript, compiled with tsc)
 dev/      Docker test machine: SSH server + XFCE on a virtual screen
@@ -59,14 +60,14 @@ Needs Node 24+, pnpm, Go 1.27, and Docker for the test machine.
 
 ```sh
 pnpm install
-pnpm dev        # builds the agent and web client, serves http://127.0.0.1:8080
+pnpm dev        # builds the host and web client, serves http://127.0.0.1:8080
 ```
 
 | Script            | What it does                                                    |
 | ----------------- | --------------------------------------------------------------- |
 | `pnpm dev`        | Build everything, then run the server with auto-reload          |
 | `pnpm dev:target` | Build and start the Docker test machine                         |
-| `pnpm build`      | Build the web client and agent binaries (linux amd64 + arm64)   |
+| `pnpm build`      | Build the web client and host binaries (linux amd64 + arm64)    |
 | `pnpm start`      | Build, then run the server                                      |
 | `pnpm typecheck`  | Type-check the server and web client                            |
 
@@ -95,7 +96,7 @@ Server environment variables:
 | `WEBDESK_ICE_SERVERS` | Google STUN                    | JSON array of `RTCIceServer`, e.g. to add a TURN relay        |
 | `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in `pnpm dev`) | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
 
-Agent environment variables, read from the SSH session's environment:
+Host program environment variables, read from the SSH session's environment:
 
 | Variable              | Default | Purpose                                                           |
 | --------------------- | ------- | ----------------------------------------------------------------- |

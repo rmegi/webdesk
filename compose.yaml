@@ -10,7 +10,7 @@ services:
     init: true # reap processes orphaned by ended SSH sessions
     ports:
       - "2222:22"
-      # WebRTC traffic; the agent pins ICE to this port (see the Dockerfile).
+      # WebRTC traffic; the host pins ICE to this port (see the Dockerfile).
       - "50000:50000/udp"
       - "50000:50000/tcp"
     volumes:
