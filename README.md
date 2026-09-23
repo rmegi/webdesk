@@ -51,7 +51,7 @@ X11 desktop instead.
 host/      Go program that runs on the target: screen capture, WebRTC, input
 backend/   Node server: SSH login, signaling relay, and its Dockerfile
 frontend/  Browser client (TypeScript), with its nginx image and config
-dev/       Docker test machine: SSH server + XFCE on a virtual screen
+test/      Docker test machine: SSH server + XFCE on a virtual screen
 ```
 
 ## Running
@@ -91,7 +91,7 @@ npm run dev     # builds the host and web client, serves http://127.0.0.1:8080
 | `npm run dev`         | Build everything, then run the server with auto-reload      |
 | `npm run docker`      | Start the test machine and the server, both in Docker       |
 | `npm run docker:down` | Stop both containers                                        |
-| `npm run dev:target`  | Build and start the Docker test machine                     |
+| `npm run test:target` | Build and start the Docker test machine                     |
 | `npm run build`       | Build the web client and host binaries (linux amd64 + arm64)|
 | `npm start`           | Build, then run the server                                  |
 | `npm run typecheck`   | Type-check the server and web client                        |
@@ -104,11 +104,11 @@ full build and a Docker build on every push to `main` and on pull requests.
 A Docker container with an SSH server and a logged-in XFCE desktop:
 
 ```sh
-npm run dev:target
+npm run test:target
 ```
 
 Connect to host `127.0.0.1`, port `2222`, user `desk`, password `desk`.
-Leaving the password empty logs in with the dev SSH key in `dev/ssh/`.
+Leaving the password empty logs in with the test SSH key in `test/ssh/`.
 
 From a server that is itself in Docker, the test machine answers to its service
 name instead: host `target`, port `22`.
@@ -122,7 +122,7 @@ Server environment variables:
 | `PORT`                | `8080`                         | HTTP port                                                     |
 | `HOST`                | `127.0.0.1`                    | Listen address                                                |
 | `WEBDESK_ICE_SERVERS` | Google STUN                    | JSON array of `RTCIceServer`, e.g. to add a TURN relay        |
-| `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in dev)      | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
+| `WEBDESK_SSH_KEY`     | none (`test/ssh/…` in dev)     | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
 
 Host program environment variables, read from the SSH session's environment:
 
