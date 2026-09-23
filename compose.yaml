@@ -32,9 +32,9 @@ services:
     volumes:
       # Pinned host keys, so a rebuild doesn't ask about every machine again.
       - known-hosts:/app/backend/data
-      # Keys tried when the password is left empty. dev/ssh holds the one the
+      # Keys tried when the password is left empty. test/ssh holds the one the
       # test target trusts; point this at ~/.ssh to use your own instead.
-      - ./dev/ssh:/keys:ro
+      - ./test/ssh:/keys:ro
     environment:
       WEBDESK_SSH_KEY: /keys/id_ed25519
       # WEBDESK_ICE_SERVERS: '[{"urls":["stun:stun.l.google.com:19302"]}]'
@@ -46,7 +46,7 @@ services:
     profiles: ["target"]
     build:
       context: .
-      dockerfile: dev/target.Dockerfile
+      dockerfile: test/target.Dockerfile
     init: true # reap processes orphaned by ended SSH sessions
     ports:
       - "2222:22"
@@ -54,7 +54,7 @@ services:
       - "50000:50000/udp"
       - "50000:50000/tcp"
     volumes:
-      - ./dev/ssh:/etc/webdesk/ssh:ro
+      - ./test/ssh:/etc/webdesk/ssh:ro
     shm_size: 512m
 
 volumes:

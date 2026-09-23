@@ -25,5 +25,5 @@ RUN echo 'desk:desk' | chpasswd && mkdir -p /run/sshd
 # /etc/environment to SSH sessions through pam_env.
 RUN printf 'WEBDESK_ICE_PORT=50000\nWEBDESK_ICE_HOST_IP=127.0.0.1\n' >> /etc/environment
 
-COPY dev/start-target.sh dev/start-desktop.sh /usr/local/bin/
+COPY test/start-target.sh test/start-desktop.sh /usr/local/bin/
 CMD ["start-target.sh"]

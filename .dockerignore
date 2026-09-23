@@ -4,4 +4,4 @@ node_modules
 frontend/dist
 host/dist
 backend/data
-dev/ssh
+test/ssh
