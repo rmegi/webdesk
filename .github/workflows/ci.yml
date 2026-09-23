@@ -16,6 +16,10 @@ jobs:
           node-version: 24
           cache: npm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: host/go.mod
@@ -24,6 +28,11 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - run: npm run typecheck
+
+      - name: Import the server
+        run: |
+          pip install --quiet -r backend/requirements.txt
+          cd backend/app && python -c "import main"
 
       - name: Go format and vet
         working-directory: host

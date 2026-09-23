@@ -1,0 +1,3 @@
+asyncssh>=2.21,<3
+fastapi>=0.128,<1
+uvicorn[standard]>=0.39,<1

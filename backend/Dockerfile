@@ -16,17 +16,18 @@ COPY host/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/webdesk-host-linux-amd64 . \
  && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o dist/webdesk-host-linux-arm64 .
 
-FROM node:24-alpine AS serve
-WORKDIR /app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080
-# ssh2 and ws ship optional native speedups; the pure JS fallbacks are fine and
-# save a C toolchain in the image.
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund \
- && npm cache clean --force
-COPY backend/ ./backend/
-COPY --from=host /src/dist ./host/dist
+# Slim rather than Alpine: asyncssh pulls in cryptography, which has manylinux
+# wheels but would need a Rust toolchain to build against musl.
+FROM python:3.13-slim AS serve
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HOST=0.0.0.0 PORT=8080
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+COPY backend/app/ /app/backend/app/
+COPY --from=host /src/dist /app/host/dist
 # Host keys are pinned here; compose mounts a volume so they survive a rebuild.
-RUN mkdir -p backend/data
+RUN mkdir -p /app/backend/data
+# app/ is the import root: modules refer to each other as routes.x, handlers.x,
+# utils.x, so that is where uvicorn has to run from.
+WORKDIR /app/backend/app
 EXPOSE 8080
-CMD ["node", "backend/server.ts"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "warning"]

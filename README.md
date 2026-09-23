@@ -49,7 +49,7 @@ X11 desktop instead.
 
 ```
 host/      Go program that runs on the target: screen capture, WebRTC, input
-backend/   Node server: SSH login, signaling relay, and its Dockerfile
+backend/   Python server: SSH login, signaling relay, and its Dockerfile
 frontend/  Browser client (TypeScript), with its nginx image and config
 test/      Docker test machine: SSH server + XFCE on a virtual screen
 ```
@@ -65,9 +65,10 @@ docker compose up -d --build
 ```
 
 Two services. `frontend` is nginx with the compiled web client, and it passes
-the signaling WebSocket through to `backend`, which does the SSH login and
-carries the host binaries it uploads to target machines. Video and input touch
-neither of them: the browser talks to the target machine directly over WebRTC.
+the signaling WebSocket through to `backend`, a FastAPI server that does the
+SSH login and carries the host binaries it uploads to target machines. Video
+and input touch neither of them: the browser talks to the target machine
+directly over WebRTC.
 
 Build on each machine you run it on and the images take that machine's
 architecture, arm64 on a Mac and amd64 on a PC. The host binaries are
@@ -79,25 +80,30 @@ machine again. `docker compose down` stops it; add `-v` to forget the keys too.
 
 ### From source
 
-Needs Node 24+, Go 1.27, and Docker for the test machine.
+Needs Python 3.11+, Node 24+ and Go 1.27 to build with, and Docker for the test
+machine. Node is only build tooling here: the web client is compiled with `tsc`
+and nothing at runtime uses it.
 
 ```sh
 npm install
+pip install -r backend/requirements.txt
 npm run dev     # builds the host and web client, serves http://127.0.0.1:8080
 ```
+
+Run from source there is no nginx, so the server hands out the page itself.
 
 | Script                | What it does                                                |
 | --------------------- | ----------------------------------------------------------- |
 | `npm run dev`         | Build everything, then run the server with auto-reload      |
-| `npm run docker`      | Start the test machine and the server, both in Docker       |
-| `npm run docker:down` | Stop both containers                                        |
+| `npm run docker`      | Build and start the app in Docker                           |
+| `npm run docker:down` | Stop every container, the test machine included             |
 | `npm run test:target` | Build and start the Docker test machine                     |
 | `npm run build`       | Build the web client and host binaries (linux amd64 + arm64)|
-| `npm start`           | Build, then run the server                                  |
-| `npm run typecheck`   | Type-check the server and web client                        |
+| `npm run typecheck`   | Type-check the web client                                   |
 
-CI (`.github/workflows/ci.yml`) runs the type checks, `gofmt`, `go vet`, the
-full build and a Docker build on every push to `main` and on pull requests.
+CI (`.github/workflows/ci.yml`) type-checks the web client, imports the
+server, runs `gofmt` and `go vet`, and builds everything including the images,
+on every push to `main` and on pull requests.
 
 ### Local test machine
 
