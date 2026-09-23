@@ -49,8 +49,8 @@ X11 desktop instead.
 
 ```
 host/      Go program that runs on the target: screen capture, WebRTC, input
-backend/   Node server: serves the page, SSH login, signaling relay
-frontend/  Browser client (TypeScript, compiled with tsc)
+backend/   Node server: SSH login, signaling relay, and its Dockerfile
+frontend/  Browser client (TypeScript), with its nginx image and config
 dev/       Docker test machine: SSH server + XFCE on a virtual screen
 ```
 
@@ -58,15 +58,19 @@ dev/       Docker test machine: SSH server + XFCE on a virtual screen
 
 ### With Docker
 
-Nothing to install but Docker. Builds the web client, cross-compiles the host
-binaries and runs the server, on http://127.0.0.1:8080:
+Nothing to install but Docker, on http://127.0.0.1:8080:
 
 ```sh
-docker compose up -d --build webdesk
+docker compose up -d --build
 ```
 
-Build it on each machine you want to run it on: the image takes that machine's
-architecture, arm64 on a Mac and amd64 on a PC. The host binaries inside are
+Two services. `frontend` is nginx with the compiled web client, and it passes
+the signaling WebSocket through to `backend`, which does the SSH login and
+carries the host binaries it uploads to target machines. Video and input touch
+neither of them: the browser talks to the target machine directly over WebRTC.
+
+Build on each machine you run it on and the images take that machine's
+architecture, arm64 on a Mac and amd64 on a PC. The host binaries are
 cross-compiled for both either way, because the machines being controlled are
 not the machine running the server.
 
