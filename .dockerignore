@@ -4,4 +4,6 @@ node_modules
 frontend/dist
 host/dist
 backend/data
+**/__pycache__
+**/*.pyc
 test/ssh
