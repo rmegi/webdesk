@@ -1,4 +1,7 @@
-# The test target image only needs its start scripts.
-*
-!dev/start-target.sh
-!dev/start-desktop.sh
+.git
+node_modules
+**/node_modules
+frontend/dist
+host/dist
+backend/data
+dev/ssh
