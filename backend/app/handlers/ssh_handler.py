@@ -1,6 +1,6 @@
+import asyncio
 import hashlib
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Awaitable, Callable, List, Optional
@@ -14,6 +14,63 @@ from utils.known_hosts import KnownHosts
 log = logging.getLogger("webdesk")
 
 PACKAGE_NAME = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
+
+
+async def offered_auth_methods(host: str, port: int, username: str, timeout: float = 5.0) -> List[str]:
+    """Which methods the machine says it accepts, for the refused-login message.
+
+    Best effort: a second connection that offers nothing and is thrown away, so
+    the real one is never disturbed. asyncssh keeps the server's list on a
+    private attribute and pops from it as methods are tried, so it has to be
+    read while auth is still running.
+    """
+    found: List[str] = []
+
+    class Probe(asyncssh.SSHClient):
+        def connection_made(self, conn):
+            self._conn = conn
+
+        def _snapshot(self):
+            methods = getattr(self._conn, "_auth_methods", None) or []
+            found.extend(m.decode() if isinstance(m, bytes) else str(m) for m in methods)
+
+        def public_key_auth_requested(self):
+            self._snapshot()
+            return None
+
+        def password_auth_requested(self):
+            self._snapshot()
+            return None
+
+        def kbdint_auth_requested(self):
+            self._snapshot()
+            return None
+
+    try:
+        conn = await asyncio.wait_for(
+            asyncssh.connect(
+                host=host, port=port, username=username, known_hosts=None, client_keys=[], client_factory=Probe
+            ),
+            timeout,
+        )
+        conn.close()
+    except Exception:  # noqa: BLE001 - the probe only ever improves a message
+        pass
+
+    ordered: List[str] = []
+    for method in found:
+        if method not in ordered:
+            ordered.append(method)
+    return ordered
+
+
+async def server_fingerprint(host: str, port: int, timeout: float = 5.0) -> Optional[str]:
+    """The key this machine is presenting now, so a mismatch can be compared."""
+    try:
+        key = await asyncio.wait_for(asyncssh.get_server_host_key(host=host, port=port), timeout)
+    except Exception:  # noqa: BLE001 - the message is still useful without it
+        return None
+    return key.get_fingerprint() if key is not None else None
 
 
 class SshHandler:
@@ -68,9 +125,22 @@ class SshHandler:
         try:
             self.conn = await asyncssh.connect(**options)
         except asyncssh.HostKeyNotVerifiable as error:
+            fingerprint = await server_fingerprint(self.host, self.port)
+            presented = f" ({fingerprint})" if fingerprint else ""
             raise UserError(
-                f"{self.host_id} presented a different host key than last time. If the machine was "
-                f"reinstalled, remove its entry from backend/data/known_hosts.json."
+                f"{self.host_id} presented a different host key than last time{presented}. If the "
+                f"machine was reinstalled, remove its entry from backend/data/known_hosts.json."
+            ) from error
+        except asyncssh.PermissionDenied as error:
+            methods = await offered_auth_methods(self.host, self.port, self.username)
+            accepts = ", ".join(methods) if methods else "none it would tell us about"
+            detail = (
+                "Check the username and the password; some accounts are set up for keys only."
+                if self.password
+                else "No password was given, and none of the server's SSH keys were accepted."
+            )
+            raise UserError(
+                f"{self.username}@{self.host} refused the login. The machine accepts: {accepts}. {detail}"
             ) from error
 
         if not pinned:
