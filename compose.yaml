@@ -1,9 +1,49 @@
-# Local test target: an SSH server plus a logged-in XFCE desktop.
-#   pnpm dev:target   builds and starts it
-#   pnpm dev          runs the server on http://localhost:8080
-# Then connect to host 127.0.0.1, port 2222, user desk, password desk.
+# webdesk in containers.
+#   docker compose up -d --build            the app, on http://127.0.0.1:8080
+#   docker compose up -d --build target     the local test machine (SSH + XFCE)
+#
+# frontend serves the page and passes /ws to backend. Video and input do not
+# come through either of them: the browser talks to the target machine directly
+# over WebRTC.
+#
+# With the test machine running, connect to host "target", port 22, user desk,
+# password desk. Inside the compose network it answers to its service name, not
+# to 127.0.0.1:2222 as it does from the host.
+name: webdesk
+
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    # Not published: the page reaches it through frontend.
+    expose:
+      - "8080"
+    volumes:
+      # Pinned host keys, so a rebuild doesn't ask about every machine again.
+      - known-hosts:/app/backend/data
+      # Keys tried when the password is left empty. dev/ssh holds the one the
+      # test target trusts; point this at ~/.ssh to use your own instead.
+      - ./dev/ssh:/keys:ro
+    environment:
+      WEBDESK_SSH_KEY: /keys/id_ed25519
+      # WEBDESK_ICE_SERVERS: '[{"urls":["stun:stun.l.google.com:19302"]}]'
+    restart: unless-stopped
+
+  # Local test target: an SSH server plus a logged-in XFCE desktop. Started on
+  # its own, not with the app.
   target:
+    profiles: ["target"]
     build:
       context: .
       dockerfile: dev/target.Dockerfile
@@ -16,3 +56,6 @@ services:
     volumes:
       - ./dev/ssh:/etc/webdesk/ssh:ro
     shm_size: 512m
+
+volumes:
+  known-hosts:

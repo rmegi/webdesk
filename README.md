@@ -49,41 +49,69 @@ X11 desktop instead.
 
 ```
 host/      Go program that runs on the target: screen capture, WebRTC, input
-backend/   Node server: serves the page, SSH login, signaling relay
-frontend/  Browser client (TypeScript, compiled with tsc)
+backend/   Node server: SSH login, signaling relay, and its Dockerfile
+frontend/  Browser client (TypeScript), with its nginx image and config
 dev/       Docker test machine: SSH server + XFCE on a virtual screen
 ```
 
 ## Running
 
-Needs Node 24+, pnpm, Go 1.27, and Docker for the test machine.
+### With Docker
+
+Nothing to install but Docker, on http://127.0.0.1:8080:
 
 ```sh
-pnpm install
-pnpm dev        # builds the host and web client, serves http://127.0.0.1:8080
+docker compose up -d --build
 ```
 
-| Script            | What it does                                                    |
-| ----------------- | --------------------------------------------------------------- |
-| `pnpm dev`        | Build everything, then run the server with auto-reload          |
-| `pnpm dev:target` | Build and start the Docker test machine                         |
-| `pnpm build`      | Build the web client and host binaries (linux amd64 + arm64)    |
-| `pnpm start`      | Build, then run the server                                      |
-| `pnpm typecheck`  | Type-check the server and web client                            |
+Two services. `frontend` is nginx with the compiled web client, and it passes
+the signaling WebSocket through to `backend`, which does the SSH login and
+carries the host binaries it uploads to target machines. Video and input touch
+neither of them: the browser talks to the target machine directly over WebRTC.
 
-CI (`.github/workflows/ci.yml`) runs the type checks, `gofmt`, `go vet` and the
-full build on every push to `main` and on pull requests.
+Build on each machine you run it on and the images take that machine's
+architecture, arm64 on a Mac and amd64 on a PC. The host binaries are
+cross-compiled for both either way, because the machines being controlled are
+not the machine running the server.
+
+Pinned host keys live in a named volume, so a rebuild doesn't ask about every
+machine again. `docker compose down` stops it; add `-v` to forget the keys too.
+
+### From source
+
+Needs Node 24+, Go 1.27, and Docker for the test machine.
+
+```sh
+npm install
+npm run dev     # builds the host and web client, serves http://127.0.0.1:8080
+```
+
+| Script                | What it does                                                |
+| --------------------- | ----------------------------------------------------------- |
+| `npm run dev`         | Build everything, then run the server with auto-reload      |
+| `npm run docker`      | Start the test machine and the server, both in Docker       |
+| `npm run docker:down` | Stop both containers                                        |
+| `npm run dev:target`  | Build and start the Docker test machine                     |
+| `npm run build`       | Build the web client and host binaries (linux amd64 + arm64)|
+| `npm start`           | Build, then run the server                                  |
+| `npm run typecheck`   | Type-check the server and web client                        |
+
+CI (`.github/workflows/ci.yml`) runs the type checks, `gofmt`, `go vet`, the
+full build and a Docker build on every push to `main` and on pull requests.
 
 ### Local test machine
 
 A Docker container with an SSH server and a logged-in XFCE desktop:
 
 ```sh
-pnpm dev:target
+npm run dev:target
 ```
 
-Then connect to host `127.0.0.1`, port `2222`, user `desk`, password `desk`.
+Connect to host `127.0.0.1`, port `2222`, user `desk`, password `desk`.
 Leaving the password empty logs in with the dev SSH key in `dev/ssh/`.
+
+From a server that is itself in Docker, the test machine answers to its service
+name instead: host `target`, port `22`.
 
 ## Configuration
 
@@ -94,7 +122,7 @@ Server environment variables:
 | `PORT`                | `8080`                         | HTTP port                                                     |
 | `HOST`                | `127.0.0.1`                    | Listen address                                                |
 | `WEBDESK_ICE_SERVERS` | Google STUN                    | JSON array of `RTCIceServer`, e.g. to add a TURN relay        |
-| `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in `pnpm dev`) | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
+| `WEBDESK_SSH_KEY`     | none (`dev/ssh/…` in dev)      | Comma-separated private key paths tried when the password is left empty (`~/` allowed; passphrase-protected keys are skipped) |
 
 Host program environment variables, read from the SSH session's environment:
 

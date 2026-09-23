@@ -11,21 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: pnpm
+          cache: npm
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: host/go.mod
           cache-dependency-path: host/go.sum
 
-      - run: pnpm install --frozen-lockfile
+      - run: npm ci --ignore-scripts
 
-      - run: pnpm typecheck
+      - run: npm run typecheck
 
       - name: Go format and vet
         working-directory: host
@@ -38,4 +36,7 @@ jobs:
           go vet ./...
 
       - name: Build web client and host binaries
-        run: pnpm build
+        run: npm run build
+
+      - name: Build the Docker image
+        run: docker compose build
