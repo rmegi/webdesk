@@ -24,7 +24,17 @@ import (
 // after the viewer disconnects, so reconnecting returns to the same windows.
 
 // Desktop sessions that work on a virtual display, in order of preference.
-var desktopSessions = []string{"startlxde-pi", "startxfce4", "mate-session", "startlxqt", "startlxde", "openbox-session"}
+// GNOME is last: gnome-shell is a compositor and falls back to software
+// rendering on Xvfb, so anything lighter is a better virtual desktop.
+var desktopSessions = []string{"startlxde-pi", "startxfce4", "mate-session", "startlxqt", "startlxde", "openbox-session", "gnome-session"}
+
+// Environment a session needs on top of the X11 backends every session gets.
+// Later entries win, so these override what the SSH session passed in.
+var sessionEnv = map[string][]string{
+	// Xvfb has no GPU, and gnome-shell refuses to start without GL. It also
+	// reads XDG_CURRENT_DESKTOP to decide which components to bring up.
+	"gnome-session": {"LIBGL_ALWAYS_SOFTWARE=1", "XDG_CURRENT_DESKTOP=GNOME"},
+}
 
 type virtualDesktop struct {
 	Display    string `json:"display"`
@@ -109,6 +119,7 @@ func startVirtualDesktop(size string) (virtualDesktop, error) {
 		"GDK_BACKEND", "QT_QPA_PLATFORM", "CLUTTER_BACKEND", "SDL_VIDEODRIVER"),
 		"DISPLAY="+display, "XAUTHORITY="+virtualAuthPath(), "XDG_SESSION_TYPE=x11",
 		"GDK_BACKEND=x11", "QT_QPA_PLATFORM=xcb", "CLUTTER_BACKEND=x11", "SDL_VIDEODRIVER=x11")
+	desktop.Env = append(desktop.Env, sessionEnv[session]...)
 	if err := startDetached(desktop, log); err != nil {
 		stopProcessGroup(xvfb.Process.Pid)
 		return virtualDesktop{}, fmt.Errorf("start %s: %w", session, err)

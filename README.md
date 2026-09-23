@@ -37,7 +37,7 @@ Browser ──WebSocket──▶ webdesk server ──SSH──▶ target machin
 
 - Linux on x86_64 or arm64, reachable over SSH from the webdesk server
 - `ffmpeg`. A virtual desktop also needs `Xvfb`, `dbus-launch` and a desktop
-  environment (LXDE on Raspberry Pi OS, XFCE, MATE, LXQt or Openbox)
+  environment (LXDE on Raspberry Pi OS, XFCE, MATE, LXQt, Openbox or GNOME)
 - On Debian, Ubuntu and Raspberry Pi OS, webdesk installs missing packages from
   the page after you confirm. That needs `sudo`: passwordless, or the same
   password you logged in with.
