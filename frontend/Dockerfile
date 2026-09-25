@@ -15,6 +15,6 @@ RUN npx tsc -p frontend
 
 FROM nginx:alpine AS serve
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
-COPY frontend/index.html frontend/style.css /usr/share/nginx/html/
+COPY frontend/index.html frontend/style.css frontend/favicon.svg /usr/share/nginx/html/
 COPY --from=build /src/frontend/dist /usr/share/nginx/html/dist
 EXPOSE 80
