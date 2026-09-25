@@ -1,0 +1,25 @@
+webdesk is MIT licensed. It is built on third-party components that keep
+their own licenses, which the Docker images distribute alongside it.
+
+Permissive, nothing to do beyond keeping their notices:
+
+  fastapi, pydantic          MIT
+  uvicorn, starlette         BSD-3-Clause
+  cryptography               Apache-2.0 OR BSD-3-Clause
+  pion/webrtc and its deps   MIT
+  jezek/xgb                  BSD-3-Clause
+  golang.org/x/*             BSD-3-Clause
+
+Worth knowing:
+
+  asyncssh                   EPL-2.0 OR GPL-2.0-or-later
+
+  The backend imports asyncssh and the backend image ships it. Under the
+  EPL-2.0 option, a larger work may be distributed under other terms --
+  webdesk's own code stays MIT -- while asyncssh itself remains EPL-2.0
+  and its source has to stay available. It is used as published, with no
+  modifications.
+
+  ffmpeg is not distributed here. The host program runs whatever ffmpeg is
+  already installed on the machine being controlled. The local test image
+  in test/ installs it for development only and is not published.

@@ -2,6 +2,7 @@
   "name": "webdesk",
   "description": "Web-based remote desktop for Linux: SSH login, WebRTC screen, mouse and keyboard",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"
