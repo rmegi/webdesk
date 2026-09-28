@@ -3,3 +3,4 @@ frontend/dist/
 host/dist/
 backend/data/
 test/ssh/
+.claude/
