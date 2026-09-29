@@ -17,6 +17,20 @@ Browser ──WebSocket──▶ webdesk ──SSH──▶ your Linux machine
 
 ## Try it
 
+On Linux, one command installs whatever's missing (git, curl, Docker),
+downloads webdesk into `~/webdesk` and starts it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rmegi/webdesk/main/install.sh | sh
+```
+
+It asks for your sudo password if it has to install anything. Run it again to
+update. Add `| sh -s -- --with-target` instead of `| sh` to also start a test
+machine to connect to. No `curl`? `wget -qO- <same URL> | sh` does the same.
+You can [read the script](install.sh) first.
+
+Already have Docker and a checkout:
+
 ```sh
 docker compose up -d --build
 ```

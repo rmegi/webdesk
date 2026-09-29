@@ -12,7 +12,7 @@
     "build:host": "cd host && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-host-linux-amd64 . && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o dist/webdesk-host-linux-arm64 .",
     "dev": "node --run build && (tsc -p frontend --watch --preserveWatchOutput & cd backend/app && WEBDESK_SSH_KEY=${WEBDESK_SSH_KEY:-../../test/ssh/id_ed25519} python3 -m uvicorn main:app --reload --host 127.0.0.1 --port 8080)",
     "test:target": "(test -f test/ssh/id_ed25519 || (mkdir -p test/ssh && ssh-keygen -q -t ed25519 -N '' -C webdesk-test -f test/ssh/id_ed25519)) && docker compose up -d --build target",
-    "docker": "docker compose up -d --build",
+    "docker": "mkdir -p test/ssh && docker compose up -d --build",
     "docker:down": "docker compose --profile target down",
     "typecheck": "tsc -p frontend --noEmit"
   },

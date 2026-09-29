@@ -4,3 +4,4 @@ host/dist/
 backend/data/
 test/ssh/
 .claude/
+test/install-logs/
