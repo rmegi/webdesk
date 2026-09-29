@@ -20,11 +20,11 @@ failed=
 for image in "$@"; do
   log=test/install-logs/$(echo "$image" | tr '/:' '__').log
   printf '%-32s ' "$image"
-  # safe.directory: the checkout is owned by a user the container doesn't have.
-  if docker run --rm --privileged -v /var/lib/docker -v "$PWD:/src:ro" \
+  # The checkout is copied and handed to root first: git refuses to clone from
+  # a repository owned by a user the container doesn't have.
+  if docker run --rm --privileged -v /var/lib/docker -v "$PWD:/mnt:ro" \
     -e WEBDESK_REPO=/src -e WEBDESK_BRANCH="$branch" \
-    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
-    "$image" sh -c 'sh /src/install.sh && sh /src/install.sh' >"$log" 2>&1; then
+    "$image" sh -c 'cp -a /mnt /src && chown -R 0:0 /src && sh /src/install.sh && sh /src/install.sh' >"$log" 2>&1; then
     echo ok
   else
     echo "FAILED (see $log)"
