@@ -2,6 +2,8 @@
 
 ### If you can SSH to it, you can see it.
 
+![webdesk connecting to a machine and opening a terminal on it](docs/demo.gif)
+
 **A Linux desktop in your browser.** Type a machine's address and password like
 you would for SSH, and its screen appears — mouse, keyboard and clipboard
 working on it.
