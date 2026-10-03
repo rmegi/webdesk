@@ -2,12 +2,14 @@ import asyncio
 import json
 import logging
 import sys
+import uuid
 from typing import Optional
 
 import asyncssh
 from fastapi import WebSocket
 
 from handlers.ssh_handler import SshHandler
+from utils import sessions
 from utils.config import ICE_SERVERS, RELAYED
 from utils.errors import UserError, describe_error
 
@@ -35,6 +37,8 @@ class SessionHandler:
         self.process: Optional[asyncssh.SSHClientProcess] = None
         self.approved = asyncio.Event()  # the viewer pressed "Install and connect"
         self.ended = False
+        # Handed to this one browser so its uploads can find this connection.
+        self.id = uuid.uuid4().hex
 
     # ---------- talking to the viewer ----------
 
@@ -51,6 +55,7 @@ class SessionHandler:
         if self.ended:
             return
         self.ended = True
+        sessions.unregister(self.id)
         self.approved.set()  # a session waiting on setup notices it ended and stops
         if error:
             await self.send({"type": "error", "message": error})
@@ -147,12 +152,14 @@ class SessionHandler:
             kind = message.get("type")
             if kind == "ready":
                 await self.status("Opening the screen...")
+                sessions.register(self.id, self)
                 await self.send(
                     {
                         "type": "joined",
                         "iceServers": ICE_SERVERS,
                         "virtual": message.get("virtual") is True,
                         "warning": message.get("warning"),
+                        "sessionId": self.id,
                     }
                 )
             elif kind == "error":

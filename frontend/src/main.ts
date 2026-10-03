@@ -11,7 +11,7 @@ interface Target {
 type Signal =
   | { type: "status"; message: string }
   | { type: "setup"; tools: string; packages: string[]; virtual: boolean }
-  | { type: "joined"; iceServers: RTCIceServer[]; virtual: boolean; warning?: string }
+  | { type: "joined"; iceServers: RTCIceServer[]; virtual: boolean; warning?: string; sessionId?: string }
   | { type: "bye"; message: string }
   | { type: "answer"; sdp: RTCSessionDescriptionInit }
   | { type: "candidate"; candidate: RTCIceCandidateInit }
@@ -51,6 +51,7 @@ let statsTimer = 0;
 let streaming = false; // the video connected at least once in this attempt
 let ended = false; // an error was already shown for this attempt
 let warning = ""; // something the machine told us about this desktop
+let sessionId = ""; // identifies this session to the upload endpoint
 
 // ---------- login ----------
 
@@ -158,6 +159,7 @@ function closeSession() {
   cursorCache.clear();
   pendingClipboard = "";
   heldPaste = null;
+  sessionId = "";
 }
 
 // A new virtual desktop is made to fit the viewer's window. Both sides are
@@ -204,6 +206,7 @@ async function onSignal(msg: Signal) {
       setupEl.hidden = false;
       break;
     case "joined":
+      sessionId = msg.sessionId ?? "";
       logoutBtn.hidden = !msg.virtual;
       if (msg.virtual) titleEl.textContent += " · virtual desktop";
       warning = msg.warning ?? "";
@@ -491,6 +494,72 @@ screenEl.addEventListener("keyup", (ev) => {
 });
 
 screenEl.addEventListener("blur", () => releaseKeys(true));
+
+// ---------- dropping a file on the desktop ----------
+
+// The file goes to the server, which writes it straight to the machine over
+// the SSH connection it already has. Dropping it on the screen puts it on the
+// desktop you are looking at.
+
+// Resolves with where the file actually landed, which is not necessarily what
+// the file was called: the server decides the name and the directory.
+function uploadFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `/upload/${sessionId}?name=${encodeURIComponent(file.name)}`);
+    request.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      setStatus(`Sending ${file.name}… ${Math.round((ev.loaded / ev.total) * 100)}%`, false);
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        try {
+          return resolve(JSON.parse(request.responseText).path ?? file.name);
+        } catch {
+          return resolve(file.name);
+        }
+      }
+      let detail = `Couldn't send ${file.name}.`;
+      try {
+        detail = JSON.parse(request.responseText).detail ?? detail;
+      } catch {
+        // No JSON body; the generic line will do.
+      }
+      reject(new Error(detail));
+    };
+    request.onerror = () => reject(new Error(`Couldn't send ${file.name}.`));
+    request.send(file);
+  });
+}
+
+async function uploadFiles(files: File[]) {
+  for (const file of files) {
+    try {
+      const path = await uploadFile(file);
+      setStatus(`${path.split("/").pop()} is on the desktop.`, false);
+    } catch (err) {
+      setStatus((err as Error).message, false);
+      return;
+    }
+  }
+}
+
+screenEl.addEventListener("dragover", (ev) => {
+  if (!sessionId) return;
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+  screenEl.classList.add("dropping");
+});
+
+screenEl.addEventListener("dragleave", () => screenEl.classList.remove("dropping"));
+
+screenEl.addEventListener("drop", (ev) => {
+  screenEl.classList.remove("dropping");
+  if (!sessionId) return;
+  ev.preventDefault();
+  const files = Array.from(ev.dataTransfer?.files ?? []);
+  if (files.length > 0) void uploadFiles(files);
+});
 
 // ---------- toolbar ----------
 
