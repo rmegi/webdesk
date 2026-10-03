@@ -6,6 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from routes.session_routes import router as session_router
+from routes.upload_routes import router as upload_router
 
 from utils.config import FRONTEND_ROOT, HOST, PORT
 
@@ -16,6 +17,7 @@ logging.getLogger("asyncssh").setLevel(logging.WARNING)
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(session_router)
+app.include_router(upload_router)
 
 # In Docker nginx serves the page and this never gets used. Running from source
 # there is no nginx, so serve it here as well.

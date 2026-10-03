@@ -50,7 +50,7 @@ That binary captures the X screen with ffmpeg, encodes H.264, and opens a
 The server only introduces the two sides. Once they're talking, video and input
 go peer-to-peer and never touch it again.
 
-Three things that make it feel quick:
+A few things worth knowing:
 
 - **The cursor is drawn locally.** It's kept out of the video and sent as a
   picture, so the pointer keeps up with your hand instead of trailing a round
@@ -60,6 +60,9 @@ Three things that make it feel quick:
 - **No desktop? It makes one.** A machine with no monitor gets a virtual X11
   desktop on Xvfb, which keeps running after you disconnect — **Log out** ends
   it.
+- **Drag a file onto the screen** and it lands on the machine's desktop, sent
+  over the SSH connection that is already open. Up to 2 GB, and it never
+  overwrites a file that is already there. Going the other way isn't built yet.
 
 ## What the machine needs
 
