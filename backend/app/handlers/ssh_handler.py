@@ -7,7 +7,7 @@ from typing import Awaitable, Callable, List, Optional
 
 import asyncssh
 
-from utils.config import ARCHES, HOST_DIR, REMOTE_DIR, SSH_KEY_FILES
+from utils.config import ARCHES, HOST_DIR, MAX_UPLOAD_BYTES, REMOTE_DIR, SSH_KEY_FILES, UPLOAD_DIR
 from utils.errors import UserError, last_lines
 from utils.known_hosts import KnownHosts
 
@@ -228,6 +228,73 @@ class SshHandler:
                 output = output.decode(errors="replace")
             raise UserError(describe_apt_failure(output))
         log.info("installed on %s: %s", self.host, " ".join(packages))
+
+    # ---------- sending a file there ----------
+
+    @staticmethod
+    def safe_name(name: str) -> str:
+        """Just the filename, whatever the browser claimed it was.
+
+        The name comes from the page, so it decides nothing about where the
+        file lands: separators and parent references are stripped rather than
+        resolved.
+        """
+        name = name.replace("\\", "/").split("/")[-1].strip()
+        name = name.lstrip(".") or "file"
+        return name[:255]
+
+    async def upload_dir(self, sftp) -> str:
+        """The desktop if there is one, so a dropped file appears in front of
+        you. Otherwise the home directory."""
+        home = await sftp.realpath(".")
+        desktop = f"{home}/{UPLOAD_DIR}"
+        return desktop if await sftp.isdir(desktop) else home
+
+    async def free_path(self, sftp, directory: str, name: str) -> str:
+        """A path that isn't taken, so a second copy never overwrites the first."""
+        path = f"{directory}/{name}"
+        if not await sftp.exists(path):
+            return path
+        stem, dot, suffix = name.rpartition(".")
+        stem, suffix = (stem, f".{suffix}") if dot else (name, "")
+        for n in range(1, 1000):
+            path = f"{directory}/{stem} ({n}){suffix}"
+            if not await sftp.exists(path):
+                return path
+        raise UserError(f"There are already too many files called {name} there.")
+
+    async def upload(self, name: str, chunks, limit: int = MAX_UPLOAD_BYTES) -> str:
+        """Writes a file to the machine as it arrives. Returns where it landed.
+
+        The stream is written straight through to SFTP rather than buffered, so
+        a large file never sits in the server's memory.
+        """
+        if self.conn is None:
+            raise UserError("Not connected to that machine any more.")
+
+        async with self.conn.start_sftp_client() as sftp:
+            directory = await self.upload_dir(sftp)
+            path = await self.free_path(sftp, directory, self.safe_name(name))
+            written = 0
+            try:
+                async with sftp.open(path, "wb") as remote:
+                    async for chunk in chunks:
+                        written += len(chunk)
+                        if written > limit:
+                            raise UserError(
+                                f"That file is larger than the {limit // 1024**3} GB limit."
+                            )
+                        await remote.write(chunk)
+            except BaseException:
+                # Don't leave half a file on someone's desktop.
+                try:
+                    await sftp.remove(path)
+                except Exception:  # noqa: BLE001 - it may never have been created
+                    pass
+                raise
+
+        log.info("uploaded to %s: %s (%d bytes)", self.host, path, written)
+        return path
 
     def can_sudo(self, check: dict) -> bool:
         return check.get("sudo") == "nopasswd" or (check.get("sudo") == "password" and self.password != "")

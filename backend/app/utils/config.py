@@ -24,4 +24,7 @@ ICE_SERVERS = (
 # Messages the viewer may pass straight through to the host program.
 RELAYED = {"offer", "candidate", "logout"}
 REMOTE_DIR = '"$HOME"/.cache/webdesk'
+# A dropped file lands on the desktop, where you can see it arrive.
+UPLOAD_DIR = "Desktop"
+MAX_UPLOAD_BYTES = 2 * 1024**3  # a misdrag shouldn't push 40GB over SSH
 ARCHES = {"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
